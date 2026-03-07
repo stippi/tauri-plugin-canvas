@@ -18,17 +18,18 @@ pub struct ViewRect {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
 #[serde(rename_all = "camelCase")]
 pub enum CanvasPlacement {
-    Fullscreen,
+    Fullscreen(String),
     Bottom { bottom: String },
     Top { top: String },
-    Region(ViewRect),
+    Region { region: ViewRect },
 }
 
 impl Default for CanvasPlacement {
     fn default() -> Self {
-        Self::Fullscreen
+        Self::Fullscreen("fullscreen".into())
     }
 }
 
