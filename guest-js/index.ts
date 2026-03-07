@@ -129,7 +129,7 @@ export async function exportImage(options: ExportOptions = {}): Promise<string> 
 export async function onStrokeStarted(
   handler: (event: StrokeStartEvent) => void,
 ): Promise<UnlistenFn> {
-  return listen<StrokeStartEvent>("canvas://stroke_started", (event) => {
+  return listen<StrokeStartEvent>("plugin:canvas:stroke_started", (event) => {
     handler(event.payload);
   });
 }
@@ -137,13 +137,13 @@ export async function onStrokeStarted(
 export async function onStrokeEnded(
   handler: (event: StrokeEndEvent) => void,
 ): Promise<UnlistenFn> {
-  return listen<StrokeEndEvent>("canvas://stroke_ended", (event) => {
+  return listen<StrokeEndEvent>("plugin:canvas:stroke_ended", (event) => {
     handler(event.payload);
   });
 }
 
 export async function onStrokesCleared(handler: () => void): Promise<UnlistenFn> {
-  return listen("canvas://strokes_cleared", () => {
+  return listen("plugin:canvas:strokes_cleared", () => {
     handler();
   });
 }

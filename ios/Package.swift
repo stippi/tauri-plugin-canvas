@@ -23,6 +23,11 @@ let package = Package(
             name: "tauri-plugin-canvas",
             dependencies: [.byName(name: "Tauri")],
             path: "Sources"
+        ),
+        .testTarget(
+            name: "PluginTests",
+            dependencies: ["tauri-plugin-canvas"],
+            path: "Tests/PluginTests"
         )
     ]
 )

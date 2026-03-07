@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 import MetalKit
 import Tauri
@@ -27,15 +26,19 @@ private enum Placement: Decodable {
             return
         }
 
-        let object = try container.decode([String: String].self)
-        if let bottom = object["bottom"] {
-            self = .bottom(bottom)
-        } else if let top = object["top"] {
-            self = .top(top)
-        } else {
-            let region = try container.decode([String: NormalizedRect].self)
-            self = .region(region["region"] ?? .init(x: 0, y: 0, width: 100, height: 100))
+        if let object = try? container.decode([String: String].self) {
+            if let bottom = object["bottom"] {
+                self = .bottom(bottom)
+                return
+            }
+            if let top = object["top"] {
+                self = .top(top)
+                return
+            }
         }
+
+        let object = try container.decode([String: NormalizedRect].self)
+        self = .region(object["region"] ?? NormalizedRect(x: 0, y: 0, width: 100, height: 100))
     }
 }
 
@@ -44,6 +47,10 @@ private struct NormalizedRect: Codable {
     let y: CGFloat
     let width: CGFloat
     let height: CGFloat
+}
+
+private struct ExportOptions: Decodable {
+    let includeBackground: Bool?
 }
 
 class CanvasPlugin: Plugin {
@@ -58,7 +65,11 @@ class CanvasPlugin: Plugin {
     }
 
     @objc public func isAvailable(_ invoke: Invoke) throws {
-        invoke.resolve(AvailabilityResponse(available: true, reason: nil))
+        let available = MTLCreateSystemDefaultDevice() != nil
+        invoke.resolve(AvailabilityResponse(
+            available: available,
+            reason: available ? nil : "Metal is not available on this device"
+        ))
     }
 
     @objc public func showCanvas(_ invoke: Invoke) throws {
@@ -80,7 +91,11 @@ class CanvasPlugin: Plugin {
     }
 
     @objc public func activatePen(_ invoke: Invoke) throws {
+        let args = try invoke.parseArgs(CanvasPenConfig.self)
         DispatchQueue.main.async {
+            self.setupOverlayIfNeeded(over: self.webview)
+            self.overlayView?.updatePen(args)
+            self.overlayView?.isHidden = false
             self.overlayView?.isUserInteractionEnabled = true
         }
         invoke.resolve()
@@ -95,25 +110,34 @@ class CanvasPlugin: Plugin {
 
     @objc public func clear(_ invoke: Invoke) throws {
         DispatchQueue.main.async {
-            self.overlayView?.clearPreviewTint()
+            self.overlayView?.clearStrokes()
         }
         invoke.resolve()
     }
 
     @objc public func undo(_ invoke: Invoke) throws {
+        DispatchQueue.main.async {
+            self.overlayView?.undoStroke()
+        }
         invoke.resolve()
     }
 
     @objc public func redo(_ invoke: Invoke) throws {
+        DispatchQueue.main.async {
+            self.overlayView?.redoStroke()
+        }
         invoke.resolve()
     }
 
     @objc public func getStrokes(_ invoke: Invoke) throws {
-        invoke.resolve([])
+        invoke.resolve(overlayView?.exportedStrokes() ?? [])
     }
 
     @objc public func exportImage(_ invoke: Invoke) throws {
-        invoke.resolve("")
+        let args = try invoke.parseArgs(ExportOptions.self)
+        let image = overlayView?.exportImage(includeBackground: args.includeBackground ?? false)
+        let pngData = image?.pngData()?.base64EncodedString() ?? ""
+        invoke.resolve(pngData)
     }
 
     private func setupOverlayIfNeeded(over webview: WKWebView?) {
@@ -124,6 +148,7 @@ class CanvasPlugin: Plugin {
         let overlay = MetalCanvasView(frame: webview.frame)
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         overlay.isHidden = true
+        overlay.strokeDelegate = self
         parentView.addSubview(overlay)
         overlay.frame = webview.frame
         parentView.bringSubviewToFront(overlay)
@@ -168,5 +193,53 @@ class CanvasPlugin: Plugin {
         let trimmed = value.replacingOccurrences(of: "%", with: "")
         guard let number = Double(trimmed) else { return 1.0 }
         return CGFloat(number / 100.0)
+    }
+}
+
+extension CanvasPlugin: MetalCanvasViewDelegate {
+    func metalCanvasView(_ view: MetalCanvasView, didStartStroke strokeId: String) {
+        trigger("stroke_started", data: ["strokeId": strokeId])
+    }
+
+    func metalCanvasView(_ view: MetalCanvasView, didEndStroke stroke: CanvasStroke) {
+        trigger("stroke_ended", data: [
+            "strokeId": stroke.id,
+            "points": stroke.points.map { point in
+                [
+                    "x": point.x,
+                    "y": point.y,
+                    "pressure": point.pressure,
+                    "altitude": point.altitude,
+                    "azimuth": point.azimuth,
+                    "timestamp": point.timestamp,
+                ]
+            },
+            "boundingBox": [
+                "x": stroke.boundingBox.x,
+                "y": stroke.boundingBox.y,
+                "width": stroke.boundingBox.width,
+                "height": stroke.boundingBox.height,
+            ],
+        ] as JSObject)
+    }
+
+    func metalCanvasViewDidClear(_ view: MetalCanvasView) {
+        trigger("strokes_cleared", data: [:])
+    }
+}
+
+extension UIColor {
+    convenience init?(hex: String) {
+        var value = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        if value.count == 6 {
+            value.append("FF")
+        }
+        guard value.count == 8, let number = UInt64(value, radix: 16) else { return nil }
+        self.init(
+            red: CGFloat((number >> 24) & 0xff) / 255.0,
+            green: CGFloat((number >> 16) & 0xff) / 255.0,
+            blue: CGFloat((number >> 8) & 0xff) / 255.0,
+            alpha: CGFloat(number & 0xff) / 255.0
+        )
     }
 }
