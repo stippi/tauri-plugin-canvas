@@ -167,8 +167,8 @@ class CanvasPlugin: Plugin {
     }
 
     private func applyPlacement(_ placement: Placement) {
-        guard let overlay = overlayView, let parentView = parentView else { return }
-        let bounds = parentView.bounds
+        guard let overlay = overlayView, let webview = webview else { return }
+        let bounds = webview.frame
 
         switch placement {
         case .fullscreen:
@@ -191,8 +191,8 @@ class CanvasPlugin: Plugin {
             )
         case .region(let region):
             overlay.frame = CGRect(
-                x: bounds.width * region.x / 100.0,
-                y: bounds.height * region.y / 100.0,
+                x: bounds.minX + bounds.width * region.x / 100.0,
+                y: bounds.minY + bounds.height * region.y / 100.0,
                 width: bounds.width * region.width / 100.0,
                 height: bounds.height * region.height / 100.0
             )
