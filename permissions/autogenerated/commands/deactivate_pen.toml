@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-deactivate-pen"
+description = "Enables the deactivate_pen command without any pre-configured scope."
+commands.allow = ["deactivate_pen"]
+
+[[permission]]
+identifier = "deny-deactivate-pen"
+description = "Denies the deactivate_pen command without any pre-configured scope."
+commands.deny = ["deactivate_pen"]

@@ -1,0 +1,13 @@
+.DS_Store
+/dist-js
+/node_modules
+/target
+/ios/.build
+/ios/Packages
+/ios/*.xcodeproj
+/ios/xcuserdata
+/ios/DerivedData
+/ios/.swiftpm/config/registries.json
+/ios/.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+/ios/.netrc
+/ios/Package.resolved
