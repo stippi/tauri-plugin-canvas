@@ -343,6 +343,18 @@
           "markdownDescription": "Denies the export_image command without any pre-configured scope."
         },
         {
+          "description": "Enables the export_latest_stroke_fragment command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-export-latest-stroke-fragment",
+          "markdownDescription": "Enables the export_latest_stroke_fragment command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the export_latest_stroke_fragment command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-export-latest-stroke-fragment",
+          "markdownDescription": "Denies the export_latest_stroke_fragment command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_strokes command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-strokes",
@@ -391,6 +403,30 @@
           "markdownDescription": "Denies the redo command without any pre-configured scope."
         },
         {
+          "description": "Enables the register_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-register-listener",
+          "markdownDescription": "Enables the register_listener command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the register_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-register-listener",
+          "markdownDescription": "Denies the register_listener command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the remove_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-remove-listener",
+          "markdownDescription": "Enables the remove_listener command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the remove_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-remove-listener",
+          "markdownDescription": "Denies the remove_listener command without any pre-configured scope."
+        },
+        {
           "description": "Enables the show_canvas command without any pre-configured scope.",
           "type": "string",
           "const": "allow-show-canvas",
@@ -415,10 +451,10 @@
           "markdownDescription": "Denies the undo command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the canvas plugin\n#### This default permission set includes:\n\n- `allow-show-canvas`\n- `allow-hide-canvas`\n- `allow-is-available`\n- `allow-activate-pen`\n- `allow-deactivate-pen`\n- `allow-clear`\n- `allow-undo`\n- `allow-redo`\n- `allow-get-strokes`\n- `allow-export-image`",
+          "description": "Default permissions for the canvas plugin\n#### This default permission set includes:\n\n- `allow-show-canvas`\n- `allow-hide-canvas`\n- `allow-is-available`\n- `allow-activate-pen`\n- `allow-deactivate-pen`\n- `allow-clear`\n- `allow-undo`\n- `allow-redo`\n- `allow-get-strokes`\n- `allow-export-image`\n- `allow-export-latest-stroke-fragment`\n- `allow-register-listener`\n- `allow-remove-listener`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Default permissions for the canvas plugin\n#### This default permission set includes:\n\n- `allow-show-canvas`\n- `allow-hide-canvas`\n- `allow-is-available`\n- `allow-activate-pen`\n- `allow-deactivate-pen`\n- `allow-clear`\n- `allow-undo`\n- `allow-redo`\n- `allow-get-strokes`\n- `allow-export-image`"
+          "markdownDescription": "Default permissions for the canvas plugin\n#### This default permission set includes:\n\n- `allow-show-canvas`\n- `allow-hide-canvas`\n- `allow-is-available`\n- `allow-activate-pen`\n- `allow-deactivate-pen`\n- `allow-clear`\n- `allow-undo`\n- `allow-redo`\n- `allow-get-strokes`\n- `allow-export-image`\n- `allow-export-latest-stroke-fragment`\n- `allow-register-listener`\n- `allow-remove-listener`"
         }
       ]
     }

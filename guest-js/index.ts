@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { addPluginListener, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export interface AvailabilityResponse {
@@ -17,7 +17,7 @@ export type CanvasPlacement =
   | "fullscreen"
   | { bottom: string }
   | { top: string }
-  | { x: number; y: number; width: number; height: number };
+  | { x: number; y: number; width: number; height: number; unit?: "percent" | "px" };
 
 export interface CanvasConfig {
   placement?: CanvasPlacement;
@@ -61,11 +61,26 @@ export interface ExportOptions {
   includeBackground?: boolean;
 }
 
+export interface StrokeFragment {
+  strokeId: string;
+  boundingBox: Rect;
+  imageData: string;
+}
+
+export interface DebugEvent {
+  source: string;
+  message: string;
+}
+
 function normalizePlacement(placement?: CanvasPlacement) {
   if (!placement || placement === "fullscreen") {
     return "fullscreen";
   }
   if ("x" in placement) {
+    if (placement.unit === "px") {
+      const { unit: _unit, ...viewport } = placement;
+      return { viewport };
+    }
     return { region: placement };
   }
   if ("bottom" in placement) {
@@ -126,10 +141,21 @@ export async function exportImage(options: ExportOptions = {}): Promise<string> 
   return invoke<string>("plugin:canvas|export_image", { options });
 }
 
+export async function exportLatestStrokeFragment(): Promise<StrokeFragment | null> {
+  return invoke<StrokeFragment | null>("plugin:canvas|export_latest_stroke_fragment");
+}
+
 export async function onStrokeStarted(
   handler: (event: StrokeStartEvent) => void,
 ): Promise<UnlistenFn> {
-  return listen<StrokeStartEvent>("plugin:canvas:stroke_started", (event) => {
+  if (isMobilePlatform()) {
+    const listener = await addPluginListener<StrokeStartEvent>("canvas", "strokeStarted", handler);
+    return async () => {
+      await listener.unregister();
+    };
+  }
+
+  return listen<StrokeStartEvent>("plugin:canvas:strokeStarted", (event) => {
     handler(event.payload);
   });
 }
@@ -137,13 +163,71 @@ export async function onStrokeStarted(
 export async function onStrokeEnded(
   handler: (event: StrokeEndEvent) => void,
 ): Promise<UnlistenFn> {
-  return listen<StrokeEndEvent>("plugin:canvas:stroke_ended", (event) => {
+  if (isMobilePlatform()) {
+    const listener = await addPluginListener<StrokeEndEvent>("canvas", "strokeEnded", handler);
+    return async () => {
+      await listener.unregister();
+    };
+  }
+
+  return listen<StrokeEndEvent>("plugin:canvas:strokeEnded", (event) => {
     handler(event.payload);
   });
 }
 
 export async function onStrokesCleared(handler: () => void): Promise<UnlistenFn> {
-  return listen("plugin:canvas:strokes_cleared", () => {
+  if (isMobilePlatform()) {
+    const listener = await addPluginListener("canvas", "strokesCleared", handler);
+    return async () => {
+      await listener.unregister();
+    };
+  }
+
+  return listen("plugin:canvas:strokesCleared", () => {
     handler();
   });
+}
+
+export async function onDebug(
+  handler: (event: DebugEvent) => void,
+): Promise<UnlistenFn> {
+  if (isMobilePlatform()) {
+    const listener = await addPluginListener<DebugEvent>("canvas", "debug", handler);
+    return async () => {
+      await listener.unregister();
+    };
+  }
+
+  return listen<DebugEvent>("plugin:canvas:debug", (event) => {
+    handler(event.payload);
+  });
+}
+
+function isMobilePlatform(): boolean {
+  const w = window as typeof window & {
+    __TAURI_INTERNALS__?: { plugins?: { os?: { platform?: string } } };
+    Android?: unknown;
+    webkit?: { messageHandlers?: unknown };
+  };
+
+  const platform = w.__TAURI_INTERNALS__?.plugins?.os?.platform;
+  if (platform === "android" || platform === "ios") {
+    return true;
+  }
+
+  if (w.Android) {
+    return true;
+  }
+
+  if (w.webkit?.messageHandlers) {
+    if (navigator.maxTouchPoints > 1) {
+      return true;
+    }
+    const ua = navigator.userAgent.toLowerCase();
+    if (ua.includes("iphone") || ua.includes("ipod")) {
+      return true;
+    }
+  }
+
+  return false;
 }

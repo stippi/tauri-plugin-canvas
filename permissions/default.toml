@@ -13,4 +13,7 @@ permissions = [
     "allow-redo",
     "allow-get-strokes",
     "allow-export-image",
+    "allow-export-latest-stroke-fragment",
+    "allow-register-listener",
+    "allow-remove-listener",
 ]

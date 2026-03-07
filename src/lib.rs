@@ -30,8 +30,11 @@ impl<R: Runtime, T: Manager<R>> CanvasExt<R> for T {
 }
 
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
-    Builder::new("canvas")
-        .invoke_handler(tauri::generate_handler![
+    let mut builder = Builder::new("canvas");
+
+    #[cfg(desktop)]
+    {
+        builder = builder.invoke_handler(tauri::generate_handler![
             commands::show_canvas,
             commands::hide_canvas,
             commands::is_available,
@@ -42,7 +45,30 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::redo,
             commands::get_strokes,
             commands::export_image,
-        ])
+            commands::export_latest_stroke_fragment,
+            commands::register_listener,
+            commands::remove_listener,
+        ]);
+    }
+
+    #[cfg(mobile)]
+    {
+        builder = builder.invoke_handler(tauri::generate_handler![
+            commands::show_canvas,
+            commands::hide_canvas,
+            commands::is_available,
+            commands::activate_pen,
+            commands::deactivate_pen,
+            commands::clear,
+            commands::undo,
+            commands::redo,
+            commands::get_strokes,
+            commands::export_image,
+            commands::export_latest_stroke_fragment,
+        ]);
+    }
+
+    builder
         .setup(|app, api| {
             #[cfg(mobile)]
             let canvas = mobile::init(app, api)?;

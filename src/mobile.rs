@@ -4,7 +4,7 @@ use tauri::{
     AppHandle, Runtime,
 };
 
-use crate::models::{AvailabilityResponse, CanvasConfig, ExportOptions, PenConfig, Stroke};
+use crate::models::{AvailabilityResponse, CanvasConfig, ExportOptions, PenConfig, Stroke, StrokeFragment};
 
 #[cfg(target_os = "ios")]
 tauri::ios_plugin_binding!(init_plugin_canvas);
@@ -68,6 +68,12 @@ impl<R: Runtime> Canvas<R> {
     pub fn export_image(&self, options: ExportOptions) -> crate::Result<String> {
         self.0
             .run_mobile_plugin("exportImage", options)
+            .map_err(Into::into)
+    }
+
+    pub fn export_latest_stroke_fragment(&self) -> crate::Result<Option<StrokeFragment>> {
+        self.0
+            .run_mobile_plugin("exportLatestStrokeFragment", ())
             .map_err(Into::into)
     }
 }

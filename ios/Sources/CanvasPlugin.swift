@@ -18,6 +18,7 @@ private enum Placement: Decodable {
     case bottom(String)
     case top(String)
     case region(NormalizedRect)
+    case viewport(NormalizedRect)
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
@@ -38,6 +39,10 @@ private enum Placement: Decodable {
         }
 
         let object = try container.decode([String: NormalizedRect].self)
+        if let viewport = object["viewport"] {
+            self = .viewport(viewport)
+            return
+        }
         self = .region(object["region"] ?? NormalizedRect(x: 0, y: 0, width: 100, height: 100))
     }
 }
@@ -53,25 +58,17 @@ private struct ExportOptions: Decodable {
     let includeBackground: Bool?
 }
 
-private struct StrokeStartedEvent: Encodable {
-    let strokeId: String
-}
-
-private struct StrokeEndedEvent: Encodable {
-    let strokeId: String
-    let points: [CanvasPoint]
-    let boundingBox: CanvasRect
-}
-
 class CanvasPlugin: Plugin {
     private weak var webview: WKWebView?
     private weak var parentView: UIView?
     private var overlayView: MetalCanvasView?
+    private var lastLayoutSnapshot = "layout snapshot unavailable"
 
     @objc override func load(webview: WKWebView) {
         self.webview = webview
         self.parentView = webview.superview
         setupOverlayIfNeeded(over: webview)
+        updateLayoutSnapshot(label: "load")
     }
 
     @objc public func isAvailable(_ invoke: Invoke) throws {
@@ -88,6 +85,7 @@ class CanvasPlugin: Plugin {
             self.setupOverlayIfNeeded(over: self.webview)
             self.overlayView?.isHidden = false
             self.applyPlacement(args.placement ?? .fullscreen)
+            self.emitDebug(self.lastLayoutSnapshot)
         }
         invoke.resolve()
     }
@@ -107,6 +105,8 @@ class CanvasPlugin: Plugin {
             self.overlayView?.updatePen(args)
             self.overlayView?.isHidden = false
             self.overlayView?.isUserInteractionEnabled = true
+            self.updateLayoutSnapshot(label: "activatePen")
+            self.emitDebug(self.lastLayoutSnapshot)
         }
         invoke.resolve()
     }
@@ -150,53 +150,89 @@ class CanvasPlugin: Plugin {
         invoke.resolve(pngData)
     }
 
+    @objc public func exportLatestStrokeFragment(_ invoke: Invoke) throws {
+        invoke.resolve(overlayView?.exportLatestStrokeFragment())
+    }
+
+    private func emitEvent(_ eventName: String, data: JSObject) {
+        DispatchQueue.main.async { [weak self] in
+            self?.trigger(eventName, data: data)
+        }
+    }
+
+    private func emitClearEvent(_ eventName: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.trigger(eventName, data: [:])
+        }
+    }
+
+    private func emitDebug(_ message: String) {
+        emitEvent("debug", data: [
+            "source": "ios-canvas",
+            "message": message,
+        ] as JSObject)
+    }
+
     private func setupOverlayIfNeeded(over webview: WKWebView?) {
         guard overlayView == nil, let webview, let parentView = webview.superview else {
             return
         }
 
-        let overlay = MetalCanvasView(frame: webview.frame)
+        let overlay = MetalCanvasView(frame: parentView.bounds)
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         overlay.isHidden = true
         overlay.strokeDelegate = self
         parentView.addSubview(overlay)
-        overlay.frame = webview.frame
+        overlay.frame = parentView.bounds
         parentView.bringSubviewToFront(overlay)
         self.overlayView = overlay
         self.parentView = parentView
+        updateLayoutSnapshot(label: "setupOverlay")
     }
 
     private func applyPlacement(_ placement: Placement) {
-        guard let overlay = overlayView, let webview = webview else { return }
-        let bounds = webview.frame
+        guard let overlay = overlayView, let parentView = parentView else { return }
+        overlay.frame = parentView.bounds
+        let usableBounds = overlay.bounds
+        let drawingRect: CGRect
 
         switch placement {
         case .fullscreen:
-            overlay.frame = bounds
+            drawingRect = usableBounds
         case .bottom(let bottom):
             let fraction = max(0.0, min(1.0, parsePercent(bottom)))
-            overlay.frame = CGRect(
-                x: bounds.minX,
-                y: bounds.maxY - bounds.height * fraction,
-                width: bounds.width,
-                height: bounds.height * fraction
+            drawingRect = CGRect(
+                x: usableBounds.minX,
+                y: usableBounds.maxY - usableBounds.height * fraction,
+                width: usableBounds.width,
+                height: usableBounds.height * fraction
             )
         case .top(let top):
             let fraction = max(0.0, min(1.0, parsePercent(top)))
-            overlay.frame = CGRect(
-                x: bounds.minX,
-                y: bounds.minY,
-                width: bounds.width,
-                height: bounds.height * fraction
+            drawingRect = CGRect(
+                x: usableBounds.minX,
+                y: usableBounds.minY,
+                width: usableBounds.width,
+                height: usableBounds.height * fraction
             )
         case .region(let region):
-            overlay.frame = CGRect(
-                x: bounds.minX + bounds.width * region.x / 100.0,
-                y: bounds.minY + bounds.height * region.y / 100.0,
-                width: bounds.width * region.width / 100.0,
-                height: bounds.height * region.height / 100.0
+            drawingRect = CGRect(
+                x: usableBounds.minX + usableBounds.width * region.x / 100.0,
+                y: usableBounds.minY + usableBounds.height * region.y / 100.0,
+                width: usableBounds.width * region.width / 100.0,
+                height: usableBounds.height * region.height / 100.0
+            )
+        case .viewport(let viewport):
+            drawingRect = CGRect(
+                x: viewport.x,
+                y: viewport.y,
+                width: viewport.width,
+                height: viewport.height
             )
         }
+
+        overlay.updateDrawingRect(drawingRect.intersection(overlay.bounds))
+        updateLayoutSnapshot(label: "applyPlacement")
     }
 
     private func parsePercent(_ value: String) -> CGFloat {
@@ -204,26 +240,102 @@ class CanvasPlugin: Plugin {
         guard let number = Double(trimmed) else { return 1.0 }
         return CGFloat(number / 100.0)
     }
+
+    private func updateLayoutSnapshot(label: String) {
+        guard let webview = webview, let parentView = parentView, let overlay = overlayView else {
+            lastLayoutSnapshot = "[\(label)] missing views webview=\(webview != nil) parent=\(parentView != nil) overlay=\(overlayView != nil)"
+            return
+        }
+
+        let webviewInParent = webview.convert(webview.bounds, to: parentView)
+        let overlayInParent = overlay.convert(overlay.bounds, to: parentView)
+        let parentInWindow = parentView.convert(parentView.bounds, to: nil)
+        let windowBounds = parentView.window?.bounds ?? .zero
+        let windowSafeArea = parentView.window?.safeAreaInsets ?? .zero
+
+        lastLayoutSnapshot = [
+            "[\(label)]",
+            "parent.bounds=\(format(parentView.bounds))",
+            "parent.safeArea=\(format(windowSafeArea: parentView.safeAreaInsets))",
+            "parent.inWindow=\(format(parentInWindow))",
+            "window.bounds=\(format(windowBounds))",
+            "window.safeArea=\(format(windowSafeArea: windowSafeArea))",
+            "webview.frame=\(format(webview.frame))",
+            "webview.bounds=\(format(webview.bounds))",
+            "webview.inParent=\(format(webviewInParent))",
+            "scroll.contentInset=\(format(edgeInsets: webview.scrollView.contentInset))",
+            "scroll.adjustedInset=\(format(edgeInsets: webview.scrollView.adjustedContentInset))",
+            "overlay.frame=\(format(overlay.frame))",
+            "overlay.bounds=\(format(overlay.bounds))",
+            "overlay.inParent=\(format(overlayInParent))",
+            "drawingRect=\(format(overlay.currentDrawingRect))",
+        ].joined(separator: " ")
+    }
+
+    private func format(_ rect: CGRect) -> String {
+        String(
+            format: "{x:%.1f,y:%.1f,w:%.1f,h:%.1f}",
+            rect.origin.x,
+            rect.origin.y,
+            rect.size.width,
+            rect.size.height
+        )
+    }
+
+    private func format(edgeInsets: UIEdgeInsets) -> String {
+        String(
+            format: "{t:%.1f,l:%.1f,b:%.1f,r:%.1f}",
+            edgeInsets.top,
+            edgeInsets.left,
+            edgeInsets.bottom,
+            edgeInsets.right
+        )
+    }
+
+    private func format(windowSafeArea: UIEdgeInsets) -> String {
+        format(edgeInsets: windowSafeArea)
+    }
 }
 
 extension CanvasPlugin: MetalCanvasViewDelegate {
     func metalCanvasView(_ view: MetalCanvasView, didStartStroke strokeId: String) {
-        try? trigger("stroke_started", data: StrokeStartedEvent(strokeId: strokeId))
+        emitDebug("didStartStroke \(strokeId)")
+        emitEvent("strokeStarted", data: [
+            "strokeId": strokeId,
+        ] as JSObject)
     }
 
     func metalCanvasView(_ view: MetalCanvasView, didEndStroke stroke: CanvasStroke) {
-        try? trigger(
-            "stroke_ended",
-            data: StrokeEndedEvent(
-                strokeId: stroke.id,
-                points: stroke.points,
-                boundingBox: stroke.boundingBox
-            )
+        let points: JSArray = stroke.points.map { point in
+            [
+                "x": point.x,
+                "y": point.y,
+                "pressure": point.pressure,
+                "altitude": point.altitude,
+                "azimuth": point.azimuth,
+                "timestamp": point.timestamp,
+            ] as JSObject
+        }
+        let boundingBox: JSObject = [
+            "x": Double(stroke.boundingBox.x),
+            "y": Double(stroke.boundingBox.y),
+            "width": Double(stroke.boundingBox.width),
+            "height": Double(stroke.boundingBox.height),
+        ]
+        emitDebug("didEndStroke \(stroke.id) points=\(stroke.points.count)")
+        emitEvent(
+            "strokeEnded",
+            data: [
+                "strokeId": stroke.id,
+                "points": points,
+                "boundingBox": boundingBox,
+            ] as JSObject
         )
     }
 
     func metalCanvasViewDidClear(_ view: MetalCanvasView) {
-        trigger("strokes_cleared", data: [:])
+        emitDebug("strokesCleared")
+        emitClearEvent("strokesCleared")
     }
 }
 

@@ -14,6 +14,9 @@ Default permissions for the canvas plugin
 - `allow-redo`
 - `allow-get-strokes`
 - `allow-export-image`
+- `allow-export-latest-stroke-fragment`
+- `allow-register-listener`
+- `allow-remove-listener`
 
 ## Permission Table
 
@@ -131,6 +134,32 @@ Denies the export_image command without any pre-configured scope.
 <tr>
 <td>
 
+`canvas:allow-export-latest-stroke-fragment`
+
+</td>
+<td>
+
+Enables the export_latest_stroke_fragment command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`canvas:deny-export-latest-stroke-fragment`
+
+</td>
+<td>
+
+Denies the export_latest_stroke_fragment command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `canvas:allow-get-strokes`
 
 </td>
@@ -228,6 +257,58 @@ Enables the redo command without any pre-configured scope.
 <td>
 
 Denies the redo command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`canvas:allow-register-listener`
+
+</td>
+<td>
+
+Enables the register_listener command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`canvas:deny-register-listener`
+
+</td>
+<td>
+
+Denies the register_listener command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`canvas:allow-remove-listener`
+
+</td>
+<td>
+
+Enables the remove_listener command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`canvas:deny-remove-listener`
+
+</td>
+<td>
+
+Denies the remove_listener command without any pre-configured scope.
 
 </td>
 </tr>

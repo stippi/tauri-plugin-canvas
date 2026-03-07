@@ -25,6 +25,7 @@ pub enum CanvasPlacement {
     Bottom { bottom: String },
     Top { top: String },
     Region { region: ViewRect },
+    Viewport { viewport: ViewRect },
 }
 
 impl Default for CanvasPlacement {
@@ -115,4 +116,12 @@ pub struct Stroke {
 pub struct ExportOptions {
     #[serde(default)]
     pub include_background: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct StrokeFragment {
+    pub stroke_id: String,
+    pub bounding_box: Rect,
+    pub image_data: String,
 }

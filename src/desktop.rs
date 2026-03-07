@@ -1,7 +1,7 @@
 use serde::de::DeserializeOwned;
 use tauri::{plugin::PluginApi, AppHandle, Runtime};
 
-use crate::models::{AvailabilityResponse, CanvasConfig, ExportOptions, PenConfig, Stroke};
+use crate::models::{AvailabilityResponse, CanvasConfig, ExportOptions, PenConfig, Stroke, StrokeFragment};
 
 pub fn init<R: Runtime, C: DeserializeOwned>(
     app: &AppHandle<R>,
@@ -57,5 +57,9 @@ impl<R: Runtime> Canvas<R> {
 
     pub fn export_image(&self, _options: ExportOptions) -> crate::Result<String> {
         Ok(String::new())
+    }
+
+    pub fn export_latest_stroke_fragment(&self) -> crate::Result<Option<StrokeFragment>> {
+        Ok(None)
     }
 }

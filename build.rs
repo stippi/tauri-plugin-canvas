@@ -9,6 +9,9 @@ const COMMANDS: &[&str] = &[
     "redo",
     "get_strokes",
     "export_image",
+    "export_latest_stroke_fragment",
+    "register_listener",
+    "remove_listener",
 ];
 
 fn main() {

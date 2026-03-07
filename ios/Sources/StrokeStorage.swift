@@ -26,6 +26,12 @@ struct CanvasStroke: Encodable {
     let boundingBox: CanvasRect
 }
 
+struct CanvasStrokeFragment: Encodable {
+    let strokeId: String
+    let boundingBox: CanvasRect
+    let imageData: String
+}
+
 struct CanvasPenConfig: Decodable {
     let color: String?
     let width: CGFloat?
@@ -110,17 +116,55 @@ final class StrokeStorage {
     }
 
     func boundingBox(for stroke: ActiveStroke) -> CGRect {
-        guard let first = stroke.points.first else { return .zero }
-        return stroke.points.dropFirst().reduce(CGRect(origin: first.location, size: .zero)) { partial, point in
-            partial.union(CGRect(origin: point.location, size: .zero))
+        if stroke.points.count == 1, let point = stroke.points.first {
+            let radius = max(1.0, stroke.baseWidth * 0.5)
+            return CGRect(
+                x: point.location.x - radius,
+                y: point.location.y - radius,
+                width: radius * 2,
+                height: radius * 2
+            )
         }
+
+        let triangles = StrokeMeshBuilder.triangles(for: stroke)
+        guard let firstTriangle = triangles.first, let firstPoint = firstTriangle.first else {
+            return .zero
+        }
+
+        return triangles.flatMap { $0 }.dropFirst().reduce(
+            CGRect(origin: firstPoint, size: .zero)
+        ) { partial, point in
+            partial.union(CGRect(origin: point, size: .zero))
+        }
+    }
+
+    func lastStrokeFragment(in bounds: CGRect) -> CanvasStrokeFragment? {
+        guard let stroke = committedStrokes.last else { return nil }
+        let box = boundingBox(for: stroke)
+        let padding = max(8.0, stroke.baseWidth * 3.0)
+        let clippedBox = box.insetBy(dx: -padding, dy: -padding).intersection(bounds)
+        guard clippedBox.width > 0, clippedBox.height > 0 else { return nil }
+        guard let data = renderStrokeFragment(stroke, in: clippedBox)?.pngData()?.base64EncodedString() else {
+            return nil
+        }
+
+        return CanvasStrokeFragment(
+            strokeId: stroke.id,
+            boundingBox: CanvasRect(
+                x: normalize(clippedBox.origin.x - bounds.minX, within: bounds.width),
+                y: normalize(clippedBox.origin.y - bounds.minY, within: bounds.height),
+                width: normalize(clippedBox.width, within: bounds.width),
+                height: normalize(clippedBox.height, within: bounds.height)
+            ),
+            imageData: data
+        )
     }
 
     private func exportStroke(_ stroke: ActiveStroke, in bounds: CGRect) -> CanvasStroke {
         let points = stroke.points.map { sample in
             CanvasPoint(
-                x: normalize(sample.location.x, within: bounds.width),
-                y: normalize(sample.location.y, within: bounds.height),
+                x: normalize(sample.location.x - bounds.minX, within: bounds.width),
+                y: normalize(sample.location.y - bounds.minY, within: bounds.height),
                 pressure: max(0.0, min(1.0, sample.pressure)),
                 altitude: sample.altitude,
                 azimuth: sample.azimuth,
@@ -134,12 +178,20 @@ final class StrokeStorage {
             color: stroke.color,
             baseWidth: stroke.baseWidth,
             boundingBox: CanvasRect(
-                x: normalize(box.origin.x, within: bounds.width),
-                y: normalize(box.origin.y, within: bounds.height),
+                x: normalize(box.origin.x - bounds.minX, within: bounds.width),
+                y: normalize(box.origin.y - bounds.minY, within: bounds.height),
                 width: normalize(box.width, within: bounds.width),
                 height: normalize(box.height, within: bounds.height)
             )
         )
+    }
+
+    private func renderStrokeFragment(_ stroke: ActiveStroke, in fragmentBounds: CGRect) -> UIImage? {
+        let renderBounds = CGRect(origin: .zero, size: fragmentBounds.size)
+        let renderer = UIGraphicsImageRenderer(bounds: renderBounds)
+        return renderer.image { context in
+            renderStroke(stroke, in: context.cgContext, offset: fragmentBounds.origin)
+        }
     }
 
     private func normalize(_ value: CGFloat, within total: CGFloat) -> CGFloat {
@@ -158,19 +210,38 @@ extension StrokeStorage {
             }
 
             committedStrokes.forEach { stroke in
-                guard stroke.points.count >= 2 else { return }
-                let path = UIBezierPath()
-                path.lineCapStyle = .round
-                path.lineJoinStyle = .round
-                path.move(to: stroke.points[0].location)
-                for point in stroke.points.dropFirst() {
-                    path.addLine(to: point.location)
-                }
-                path.lineWidth = stroke.baseWidth
-                UIColor(hex: stroke.color)?.withAlphaComponent(stroke.opacity).setStroke()
-                path.stroke()
+                renderStroke(stroke, in: context.cgContext, offset: .zero)
             }
         }
     }
-}
 
+    private func renderStroke(_ stroke: ActiveStroke, in context: CGContext, offset: CGPoint) {
+        guard let color = UIColor(hex: stroke.color)?.withAlphaComponent(stroke.opacity).cgColor else {
+            return
+        }
+
+        if stroke.points.count == 1, let point = stroke.points.first {
+            context.setFillColor(color)
+            let translated = CGPoint(x: point.location.x - offset.x, y: point.location.y - offset.y)
+            let radius = max(1.0, stroke.baseWidth * 0.5)
+            context.fillEllipse(in: CGRect(
+                x: translated.x - radius,
+                y: translated.y - radius,
+                width: radius * 2,
+                height: radius * 2
+            ))
+            return
+        }
+
+        context.setFillColor(color)
+        for triangle in StrokeMeshBuilder.triangles(for: stroke) {
+            guard triangle.count == 3 else { continue }
+            context.beginPath()
+            context.move(to: CGPoint(x: triangle[0].x - offset.x, y: triangle[0].y - offset.y))
+            context.addLine(to: CGPoint(x: triangle[1].x - offset.x, y: triangle[1].y - offset.y))
+            context.addLine(to: CGPoint(x: triangle[2].x - offset.x, y: triangle[2].y - offset.y))
+            context.closePath()
+            context.fillPath()
+        }
+    }
+}

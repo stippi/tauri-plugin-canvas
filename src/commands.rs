@@ -1,6 +1,6 @@
 use tauri::{command, AppHandle, Runtime};
 
-use crate::models::{AvailabilityResponse, CanvasConfig, ExportOptions, PenConfig, Stroke};
+use crate::models::{AvailabilityResponse, CanvasConfig, ExportOptions, PenConfig, Stroke, StrokeFragment};
 use crate::{CanvasExt, Result};
 
 #[command]
@@ -60,4 +60,27 @@ pub(crate) async fn export_image<R: Runtime>(
     options: Option<ExportOptions>,
 ) -> Result<String> {
     app.canvas().export_image(options.unwrap_or_default())
+}
+
+#[command]
+pub(crate) async fn export_latest_stroke_fragment<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<Option<StrokeFragment>> {
+    app.canvas().export_latest_stroke_fragment()
+}
+
+/// Register a listener for plugin events (desktop only).
+/// On mobile, this is handled by the Plugin base class.
+#[cfg(desktop)]
+#[command]
+pub(crate) async fn register_listener() -> Result<()> {
+    Ok(())
+}
+
+/// Remove a previously registered plugin listener (desktop only).
+/// On mobile, this is handled by the Plugin base class.
+#[cfg(desktop)]
+#[command]
+pub(crate) async fn remove_listener() -> Result<()> {
+    Ok(())
 }
