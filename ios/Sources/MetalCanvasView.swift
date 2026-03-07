@@ -27,6 +27,8 @@ final class MetalCanvasView: MTKView {
         enableSetNeedsDisplay = true
         isPaused = true
         isUserInteractionEnabled = false
+        isMultipleTouchEnabled = true
+        strokeRecognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
 
         addGestureRecognizer(strokeRecognizer)
         strokeRenderer = StrokeRenderer(metalView: self)
@@ -39,9 +41,7 @@ final class MetalCanvasView: MTKView {
     }
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        guard isUserInteractionEnabled else { return false }
-        guard let touch = event?.allTouches?.first else { return false }
-        return touch.type == .pencil
+        isUserInteractionEnabled && !isHidden && alpha > 0.01
     }
 
     func updatePen(_ config: CanvasPenConfig) {
