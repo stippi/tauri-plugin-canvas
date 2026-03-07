@@ -27,7 +27,6 @@ final class MetalCanvasView: MTKView {
         enableSetNeedsDisplay = true
         isPaused = true
         isUserInteractionEnabled = false
-        allowsNextDrawableTimeout = false
 
         addGestureRecognizer(strokeRecognizer)
         strokeRenderer = StrokeRenderer(metalView: self)

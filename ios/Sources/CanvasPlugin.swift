@@ -53,6 +53,16 @@ private struct ExportOptions: Decodable {
     let includeBackground: Bool?
 }
 
+private struct StrokeStartedEvent: Encodable {
+    let strokeId: String
+}
+
+private struct StrokeEndedEvent: Encodable {
+    let strokeId: String
+    let points: [CanvasPoint]
+    let boundingBox: CanvasRect
+}
+
 class CanvasPlugin: Plugin {
     private weak var webview: WKWebView?
     private weak var parentView: UIView?
@@ -198,29 +208,18 @@ class CanvasPlugin: Plugin {
 
 extension CanvasPlugin: MetalCanvasViewDelegate {
     func metalCanvasView(_ view: MetalCanvasView, didStartStroke strokeId: String) {
-        trigger("stroke_started", data: ["strokeId": strokeId])
+        try? trigger("stroke_started", data: StrokeStartedEvent(strokeId: strokeId))
     }
 
     func metalCanvasView(_ view: MetalCanvasView, didEndStroke stroke: CanvasStroke) {
-        trigger("stroke_ended", data: [
-            "strokeId": stroke.id,
-            "points": stroke.points.map { point in
-                [
-                    "x": point.x,
-                    "y": point.y,
-                    "pressure": point.pressure,
-                    "altitude": point.altitude,
-                    "azimuth": point.azimuth,
-                    "timestamp": point.timestamp,
-                ]
-            },
-            "boundingBox": [
-                "x": stroke.boundingBox.x,
-                "y": stroke.boundingBox.y,
-                "width": stroke.boundingBox.width,
-                "height": stroke.boundingBox.height,
-            ],
-        ] as JSObject)
+        try? trigger(
+            "stroke_ended",
+            data: StrokeEndedEvent(
+                strokeId: stroke.id,
+                points: stroke.points,
+                boundingBox: stroke.boundingBox
+            )
+        )
     }
 
     func metalCanvasViewDidClear(_ view: MetalCanvasView) {
@@ -242,4 +241,9 @@ extension UIColor {
             alpha: CGFloat(number & 0xff) / 255.0
         )
     }
+}
+
+@_cdecl("init_plugin_canvas")
+func initPlugin() -> Plugin {
+    CanvasPlugin()
 }
