@@ -31,6 +31,9 @@ final class MetalCanvasView: MTKView {
         clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
         colorPixelFormat = .bgra8Unorm
         framebufferOnly = false
+        if let device, device.supportsTextureSampleCount(4) {
+            sampleCount = 4
+        }
         preferredFramesPerSecond = 120
         enableSetNeedsDisplay = true
         isPaused = true
