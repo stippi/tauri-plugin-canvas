@@ -69,8 +69,8 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
         descriptor.colorAttachments[0].isBlendingEnabled = true
         descriptor.colorAttachments[0].rgbBlendOperation = .add
         descriptor.colorAttachments[0].alphaBlendOperation = .add
-        descriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
-        descriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
+        descriptor.colorAttachments[0].sourceRGBBlendFactor = .one
+        descriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
         descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
         descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
 
@@ -165,7 +165,7 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
 
         var vertices: [StrokeRenderVertex] = []
         let color = UIColor(hex: stroke.color)?.withAlphaComponent(stroke.opacity) ?? .black
-        let rgba = color.rgba
+        let rgba = color.premultipliedRGBA
 
         for triangle in StrokeMeshBuilder.triangles(for: stroke) {
             vertices.append(contentsOf: triangle.map { point in
@@ -184,12 +184,17 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
 }
 
 private extension UIColor {
-    var rgba: SIMD4<Float> {
+    var premultipliedRGBA: SIMD4<Float> {
         var red: CGFloat = 0
         var green: CGFloat = 0
         var blue: CGFloat = 0
         var alpha: CGFloat = 0
         getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-        return SIMD4(Float(red), Float(green), Float(blue), Float(alpha))
+        return SIMD4(
+            Float(red * alpha),
+            Float(green * alpha),
+            Float(blue * alpha),
+            Float(alpha)
+        )
     }
 }
