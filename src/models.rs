@@ -56,24 +56,9 @@ impl Default for PenTool {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum PenStyle {
-    Smooth,
-    Pencil,
-}
-
-impl Default for PenStyle {
-    fn default() -> Self {
-        Self::Smooth
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct PenConfig {
     #[serde(default)]
     pub tool: PenTool,
-    #[serde(default)]
-    pub style: PenStyle,
     #[serde(default = "default_color")]
     pub color: String,
     #[serde(default = "default_width")]
@@ -88,7 +73,6 @@ impl Default for PenConfig {
     fn default() -> Self {
         Self {
             tool: PenTool::default(),
-            style: PenStyle::default(),
             color: default_color(),
             width: default_width(),
             opacity: default_opacity(),

@@ -25,7 +25,6 @@ export interface CanvasConfig {
 
 export interface PenConfig {
   tool?: "draw" | "erase";
-  style?: "smooth" | "pencil";
   color?: string;
   width?: number;
   opacity?: number;
@@ -129,7 +128,6 @@ export async function activatePen(config: PenConfig = {}): Promise<void> {
   await invoke("plugin:canvas|activate_pen", {
     config: {
       tool: config.tool ?? "draw",
-      style: config.style ?? "smooth",
       color: config.color ?? "#000000",
       width: config.width ?? 2.0,
       opacity: config.opacity ?? 1.0,

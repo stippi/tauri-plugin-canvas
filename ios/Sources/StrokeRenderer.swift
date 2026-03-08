@@ -9,46 +9,28 @@ using namespace metal;
 struct VertexIn {
   float2 position;
   float4 color;
-  float style;
 };
 
 struct VertexOut {
   float4 position [[position]];
   float4 color;
-  float style;
 };
 
 vertex VertexOut stroke_vertex(const device VertexIn* vertices [[buffer(0)]], uint id [[vertex_id]]) {
   VertexOut out;
   out.position = float4(vertices[id].position, 0.0, 1.0);
   out.color = vertices[id].color;
-  out.style = vertices[id].style;
   return out;
 }
 
-float hash21(float2 p) {
-  p = fract(p * float2(123.34, 456.21));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
-}
-
 fragment float4 stroke_fragment(VertexOut in [[stage_in]]) {
-  float4 color = in.color;
-  if (in.style > 0.5) {
-    float2 samplePos = floor((in.position.xy * 0.5 + 0.5) * 768.0);
-    float grain = hash21(samplePos);
-    float grainMix = 0.72 + grain * 0.38;
-    color.rgb *= 0.96 + grain * 0.09;
-    color.a *= grainMix;
-  }
-  return color;
+  return in.color;
 }
 """
 
 struct StrokeRenderVertex {
     var position: SIMD2<Float>
     var color: SIMD4<Float>
-    var style: Float
 }
 
 final class StrokeRenderer: NSObject, MTKViewDelegate {
@@ -184,11 +166,10 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
         var vertices: [StrokeRenderVertex] = []
         let color = UIColor(hex: stroke.color)?.withAlphaComponent(stroke.opacity) ?? .black
         let rgba = color.rgba
-        let style: Float = stroke.style == .pencil ? 1.0 : 0.0
 
         for triangle in StrokeMeshBuilder.triangles(for: stroke) {
             vertices.append(contentsOf: triangle.map { point in
-                StrokeRenderVertex(position: normalizedPoint(point, in: view.bounds), color: rgba, style: style)
+                StrokeRenderVertex(position: normalizedPoint(point, in: view.bounds), color: rgba)
             })
         }
 
