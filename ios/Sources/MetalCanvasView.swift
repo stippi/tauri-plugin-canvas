@@ -227,6 +227,7 @@ final class MetalCanvasView: MTKView {
             ActiveStroke(
                 id: stroke.id,
                 points: stroke.points,
+                style: stroke.style,
                 color: stroke.color,
                 baseWidth: stroke.baseWidth,
                 opacity: stroke.opacity * handoffOpacity,

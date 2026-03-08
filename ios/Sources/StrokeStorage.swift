@@ -38,13 +38,19 @@ struct CanvasPenConfig: Decodable {
         case erase
     }
 
+    enum Style: String, Decodable {
+        case smooth
+        case pencil
+    }
+
     let tool: Tool?
+    let style: Style?
     let color: String?
     let width: CGFloat?
     let opacity: CGFloat?
     let pressureSensitivity: CGFloat?
 
-    static let `default` = CanvasPenConfig(tool: .draw, color: "#000000", width: 2.0, opacity: 1.0, pressureSensitivity: 0.8)
+    static let `default` = CanvasPenConfig(tool: .draw, style: .smooth, color: "#000000", width: 2.0, opacity: 1.0, pressureSensitivity: 0.8)
 }
 
 struct CanvasStrokeSample {
@@ -58,6 +64,7 @@ struct CanvasStrokeSample {
 struct ActiveStroke {
     let id: String
     var points: [CanvasStrokeSample]
+    let style: CanvasPenConfig.Style
     let color: String
     let baseWidth: CGFloat
     let opacity: CGFloat
@@ -80,6 +87,7 @@ final class StrokeStorage {
         let stroke = ActiveStroke(
             id: UUID().uuidString,
             points: [sample],
+            style: pen.style ?? CanvasPenConfig.default.style ?? .smooth,
             color: pen.color ?? CanvasPenConfig.default.color ?? "#000000",
             baseWidth: pen.width ?? CanvasPenConfig.default.width ?? 2.0,
             opacity: pen.opacity ?? CanvasPenConfig.default.opacity ?? 1.0,
@@ -233,6 +241,11 @@ extension StrokeStorage {
             return
         }
 
+        if stroke.style == .pencil {
+            renderPencilStroke(stroke, in: context, offset: offset)
+            return
+        }
+
         if stroke.points.count == 1, let point = stroke.points.first {
             context.setFillColor(color)
             let translated = CGPoint(x: point.location.x - offset.x, y: point.location.y - offset.y)
@@ -256,5 +269,86 @@ extension StrokeStorage {
             context.closePath()
             context.fillPath()
         }
+    }
+
+    private func renderPencilStroke(_ stroke: ActiveStroke, in context: CGContext, offset: CGPoint) {
+        let bounds = boundingBox(for: stroke).insetBy(dx: -max(4, stroke.baseWidth), dy: -max(4, stroke.baseWidth))
+        let translatedBounds = bounds.offsetBy(dx: -offset.x, dy: -offset.y)
+        guard translatedBounds.width > 0, translatedBounds.height > 0 else {
+            return
+        }
+
+        context.saveGState()
+        context.beginPath()
+
+        if stroke.points.count == 1, let point = stroke.points.first {
+            let translated = CGPoint(x: point.location.x - offset.x, y: point.location.y - offset.y)
+            let radius = max(1.0, stroke.baseWidth * 0.5)
+            context.addEllipse(in: CGRect(
+                x: translated.x - radius,
+                y: translated.y - radius,
+                width: radius * 2,
+                height: radius * 2
+            ))
+        } else {
+            for triangle in StrokeMeshBuilder.triangles(for: stroke) {
+                guard triangle.count == 3 else { continue }
+                context.move(to: CGPoint(x: triangle[0].x - offset.x, y: triangle[0].y - offset.y))
+                context.addLine(to: CGPoint(x: triangle[1].x - offset.x, y: triangle[1].y - offset.y))
+                context.addLine(to: CGPoint(x: triangle[2].x - offset.x, y: triangle[2].y - offset.y))
+                context.closePath()
+            }
+        }
+
+        context.clip()
+
+        let baseColor = UIColor(hex: stroke.color) ?? .black
+        let rows = max(8, Int(translatedBounds.height / 1.5))
+        let columns = max(8, Int(translatedBounds.width / 1.5))
+
+        for row in 0...rows {
+            for column in 0...columns {
+                let x = translatedBounds.minX + (CGFloat(column) / CGFloat(columns)) * translatedBounds.width
+                let y = translatedBounds.minY + (CGFloat(row) / CGFloat(rows)) * translatedBounds.height
+                let noise = paperNoise(x: x + offset.x, y: y + offset.y)
+                let alpha = stroke.opacity * (0.42 + noise * 0.46)
+                let size = max(0.7, stroke.baseWidth * (0.08 + noise * 0.08))
+                context.setFillColor(baseColor.withAlphaComponent(alpha).cgColor)
+                context.fillEllipse(in: CGRect(x: x - size * 0.5, y: y - size * 0.5, width: size, height: size))
+            }
+        }
+
+        context.restoreGState()
+    }
+
+    private func paperNoise(x: CGFloat, y: CGFloat) -> CGFloat {
+        let n1 = valueNoise(x: Float(x) * 0.45, y: Float(y) * 0.45)
+        let n2 = valueNoise(x: Float(x) * 1.1, y: Float(y) * 1.1) * 0.6
+        let n3 = valueNoise(x: Float(x) * 2.5, y: Float(y) * 2.5) * 0.2
+        return CGFloat((n1 + n2 + n3) / 1.8)
+    }
+
+    private func valueNoise(x: Float, y: Float) -> Float {
+        let ix = Int(floor(x))
+        let iy = Int(floor(y))
+        let fx = x - floor(x)
+        let fy = y - floor(y)
+        let sx = fx * fx * (3.0 - 2.0 * fx)
+        let sy = fy * fy * (3.0 - 2.0 * fy)
+        let v00 = hashFloat(ix, iy)
+        let v10 = hashFloat(ix + 1, iy)
+        let v01 = hashFloat(ix, iy + 1)
+        let v11 = hashFloat(ix + 1, iy + 1)
+        let top = v00 + sx * (v10 - v00)
+        let bottom = v01 + sx * (v11 - v01)
+        return top + sy * (bottom - top)
+    }
+
+    private func hashFloat(_ x: Int, _ y: Int) -> Float {
+        var h = UInt32(truncatingIfNeeded: x) &* 374_761_393
+        h = h &+ UInt32(truncatingIfNeeded: y) &* 668_265_263
+        h = (h ^ (h >> 13)) &* 1_274_126_177
+        h = h ^ (h >> 16)
+        return Float(h & 0xFFFF) / 65535.0
     }
 }
