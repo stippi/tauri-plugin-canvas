@@ -38,13 +38,26 @@ struct CanvasPenConfig: Decodable {
         case erase
     }
 
+    enum Style: String, Decodable {
+        case smooth
+        case pencil
+    }
+
     let tool: Tool?
+    let style: Style?
     let color: String?
     let width: CGFloat?
     let opacity: CGFloat?
     let pressureSensitivity: CGFloat?
 
-    static let `default` = CanvasPenConfig(tool: .draw, color: "#000000", width: 2.0, opacity: 1.0, pressureSensitivity: 0.8)
+    static let `default` = CanvasPenConfig(
+        tool: .draw,
+        style: .smooth,
+        color: "#000000",
+        width: 2.0,
+        opacity: 1.0,
+        pressureSensitivity: 0.8
+    )
 }
 
 struct CanvasStrokeSample {
@@ -58,6 +71,7 @@ struct CanvasStrokeSample {
 struct ActiveStroke {
     let id: String
     var points: [CanvasStrokeSample]
+    let style: CanvasPenConfig.Style
     let color: String
     let baseWidth: CGFloat
     let opacity: CGFloat
@@ -80,6 +94,7 @@ final class StrokeStorage {
         let stroke = ActiveStroke(
             id: UUID().uuidString,
             points: [sample],
+            style: pen.style ?? CanvasPenConfig.default.style ?? .smooth,
             color: pen.color ?? CanvasPenConfig.default.color ?? "#000000",
             baseWidth: pen.width ?? CanvasPenConfig.default.width ?? 2.0,
             opacity: pen.opacity ?? CanvasPenConfig.default.opacity ?? 1.0,
@@ -229,6 +244,15 @@ extension StrokeStorage {
     }
 
     private func renderStroke(_ stroke: ActiveStroke, in context: CGContext, offset: CGPoint) {
+        guard UIColor(hex: stroke.color) != nil else {
+            return
+        }
+
+        if stroke.style == .pencil {
+            renderPencilStroke(stroke, in: context, offset: offset)
+            return
+        }
+
         guard let color = UIColor(hex: stroke.color)?.withAlphaComponent(stroke.opacity).cgColor else {
             return
         }
@@ -247,6 +271,120 @@ extension StrokeStorage {
         }
 
         context.setFillColor(color)
+        for triangle in StrokeMeshBuilder.triangles(for: stroke) {
+            guard triangle.count == 3 else { continue }
+            context.beginPath()
+            context.move(to: CGPoint(x: triangle[0].x - offset.x, y: triangle[0].y - offset.y))
+            context.addLine(to: CGPoint(x: triangle[1].x - offset.x, y: triangle[1].y - offset.y))
+            context.addLine(to: CGPoint(x: triangle[2].x - offset.x, y: triangle[2].y - offset.y))
+            context.closePath()
+            context.fillPath()
+        }
+    }
+
+    private func renderPencilStroke(_ stroke: ActiveStroke, in context: CGContext, offset: CGPoint) {
+        let scale = context.ctm.a == 0 ? UIScreen.main.scale : abs(context.ctm.a)
+        let shapeBounds = boundingBox(for: stroke).offsetBy(dx: -offset.x, dy: -offset.y)
+        let paddedBounds = shapeBounds.insetBy(dx: -max(3.0, stroke.baseWidth), dy: -max(3.0, stroke.baseWidth))
+        guard paddedBounds.width > 0, paddedBounds.height > 0 else {
+            return
+        }
+
+        let pixelWidth = max(1, Int(ceil(paddedBounds.width * scale)))
+        let pixelHeight = max(1, Int(ceil(paddedBounds.height * scale)))
+        let maskBytesPerRow = pixelWidth
+        var maskPixels = [UInt8](repeating: 0, count: pixelWidth * pixelHeight)
+
+        guard
+            let maskContext = CGContext(
+                data: &maskPixels,
+                width: pixelWidth,
+                height: pixelHeight,
+                bitsPerComponent: 8,
+                bytesPerRow: maskBytesPerRow,
+                space: CGColorSpaceCreateDeviceGray(),
+                bitmapInfo: CGImageAlphaInfo.none.rawValue
+            )
+        else {
+            return
+        }
+
+        maskContext.setAllowsAntialiasing(true)
+        maskContext.setShouldAntialias(true)
+        maskContext.interpolationQuality = .high
+        maskContext.translateBy(x: -paddedBounds.minX * scale, y: -paddedBounds.minY * scale)
+        maskContext.scaleBy(x: scale, y: scale)
+        drawStrokeShape(stroke, in: maskContext, offset: offset, fillColor: UIColor.white.cgColor)
+
+        let bytesPerRow = pixelWidth * 4
+        var colorPixels = [UInt8](repeating: 0, count: pixelWidth * pixelHeight * 4)
+        guard let color = UIColor(hex: stroke.color) else { return }
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+
+        for y in 0..<pixelHeight {
+            for x in 0..<pixelWidth {
+                let maskIndex = y * maskBytesPerRow + x
+                let maskAlpha = CGFloat(maskPixels[maskIndex]) / 255.0
+                guard maskAlpha > 0 else { continue }
+
+                let worldPoint = CGPoint(
+                    x: offset.x + paddedBounds.minX + (CGFloat(x) + 0.5) / scale,
+                    y: offset.y + paddedBounds.minY + (CGFloat(y) + 0.5) / scale
+                )
+                let coverage = PencilTexture.coverage(at: worldPoint, baseAlpha: stroke.opacity)
+                let finalAlpha = min(1.0, maskAlpha * stroke.opacity * coverage)
+                let premultipliedRed = UInt8(max(0, min(255, Int(round(red * finalAlpha * 255.0)))))
+                let premultipliedGreen = UInt8(max(0, min(255, Int(round(green * finalAlpha * 255.0)))))
+                let premultipliedBlue = UInt8(max(0, min(255, Int(round(blue * finalAlpha * 255.0)))))
+                let alphaByte = UInt8(max(0, min(255, Int(round(finalAlpha * 255.0)))))
+                let pixelIndex = (y * pixelWidth + x) * 4
+                colorPixels[pixelIndex] = premultipliedRed
+                colorPixels[pixelIndex + 1] = premultipliedGreen
+                colorPixels[pixelIndex + 2] = premultipliedBlue
+                colorPixels[pixelIndex + 3] = alphaByte
+            }
+        }
+
+        guard
+            let outputContext = CGContext(
+                data: &colorPixels,
+                width: pixelWidth,
+                height: pixelHeight,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+            ),
+            let image = outputContext.makeImage()
+        else {
+            return
+        }
+
+        context.saveGState()
+        context.interpolationQuality = .high
+        context.draw(image, in: paddedBounds)
+        context.restoreGState()
+    }
+
+    private func drawStrokeShape(_ stroke: ActiveStroke, in context: CGContext, offset: CGPoint, fillColor: CGColor) {
+        context.setFillColor(fillColor)
+
+        if stroke.points.count == 1, let point = stroke.points.first {
+            let translated = CGPoint(x: point.location.x - offset.x, y: point.location.y - offset.y)
+            let radius = max(1.0, stroke.baseWidth * 0.5)
+            context.fillEllipse(in: CGRect(
+                x: translated.x - radius,
+                y: translated.y - radius,
+                width: radius * 2,
+                height: radius * 2
+            ))
+            return
+        }
+
         for triangle in StrokeMeshBuilder.triangles(for: stroke) {
             guard triangle.count == 3 else { continue }
             context.beginPath()

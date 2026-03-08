@@ -8,35 +8,85 @@ using namespace metal;
 
 struct VertexIn {
   float2 position;
+  float2 canvasPosition;
   float4 color;
+  float style;
 };
 
 struct VertexOut {
   float4 position [[position]];
+  float2 canvasPosition;
   float4 color;
+  float style;
 };
 
 vertex VertexOut stroke_vertex(const device VertexIn* vertices [[buffer(0)]], uint id [[vertex_id]]) {
   VertexOut out;
   out.position = float4(vertices[id].position, 0.0, 1.0);
+  out.canvasPosition = vertices[id].canvasPosition;
   out.color = vertices[id].color;
+  out.style = vertices[id].style;
   return out;
 }
 
-fragment float4 stroke_fragment(VertexOut in [[stage_in]]) {
-  return in.color;
+float hash22(int2 p) {
+  uint h = uint(p.x) * 374761393u;
+  h += uint(p.y) * 668265263u;
+  h = (h ^ (h >> 13)) * 1274126177u;
+  h ^= (h >> 16);
+  return float(h & 0xFFFFu) / 65535.0;
+}
+
+float smoothstep_safe(float edge0, float edge1, float x) {
+  if (edge1 <= edge0) {
+    return x >= edge1 ? 1.0 : 0.0;
+  }
+  float t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+  return t * t * (3.0 - 2.0 * t);
+}
+
+float pencil_coverage(float paperHeight, float baseAlpha, float2 canvasPosition) {
+  constexpr float sampleScale = 11.34;
+  float2 scaledCanvas = canvasPosition * sampleScale;
+  float pressure = clamp(baseAlpha * 1.05 + 0.08, 0.0, 1.0);
+  float threshold = 0.56 - pressure * 0.24;
+  float tooth = smoothstep_safe(threshold - 0.2, threshold + 0.12, paperHeight);
+  int2 clumpCoord = int2(floor(scaledCanvas * 0.35)) + int2(17, 31);
+  int2 microCoord = int2(floor(scaledCanvas * 1.7)) + int2(101, 53);
+  int2 gapCoord = int2(floor(scaledCanvas * 4.8)) + int2(211, 163);
+  float clumpNoise = hash22(clumpCoord);
+  float microNoise = hash22(microCoord);
+  float gapNoise = hash22(gapCoord);
+  float clump = clumpNoise * (0.28 + 0.72 * clumpNoise);
+  float gaps = smoothstep_safe(0.42, 0.86, tooth + 0.45 * microNoise + 0.2 * gapNoise - 0.38);
+  return clamp(tooth * (0.08 + 0.92 * clump) * gaps, 0.0, 1.0);
+}
+
+fragment float4 stroke_fragment(VertexOut in [[stage_in]], texture2d<float> paperTexture [[texture(0)]]) {
+  float4 color = in.color;
+  if (in.style > 0.5) {
+    constexpr sampler paperSampler(coord::normalized, filter::linear, address::repeat);
+    float2 paperUV = fract((in.canvasPosition * 11.34) / 256.0);
+    float paperHeight = paperTexture.sample(paperSampler, paperUV).r;
+    float coverage = pencil_coverage(paperHeight, color.a, in.canvasPosition);
+    color *= coverage;
+  }
+  return color;
 }
 """
 
 struct StrokeRenderVertex {
     var position: SIMD2<Float>
+    var canvasPosition: SIMD2<Float>
     var color: SIMD4<Float>
+    var style: Float
 }
 
 final class StrokeRenderer: NSObject, MTKViewDelegate {
     private weak var metalView: MTKView?
     private let commandQueue: MTLCommandQueue
     private let pipelineState: MTLRenderPipelineState
+    private let paperTexture: MTLTexture
     private var committedVertexBuffer: MTLBuffer?
     private var activeVertexBuffer: MTLBuffer?
     private var committedVertexCount = 0
@@ -56,7 +106,8 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
             let commandQueue = device.makeCommandQueue(),
             let library = try? device.makeLibrary(source: shaderSource, options: nil),
             let vertexFunction = library.makeFunction(name: "stroke_vertex"),
-            let fragmentFunction = library.makeFunction(name: "stroke_fragment")
+            let fragmentFunction = library.makeFunction(name: "stroke_fragment"),
+            let paperTexture = PencilTexture.makeMetalTexture(device: device)
         else {
             return nil
         }
@@ -81,6 +132,7 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
         self.metalView = metalView
         self.commandQueue = commandQueue
         self.pipelineState = pipelineState
+        self.paperTexture = paperTexture
         super.init()
     }
 
@@ -140,6 +192,7 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
         }
 
         encoder.setRenderPipelineState(pipelineState)
+        encoder.setFragmentTexture(paperTexture, index: 0)
 
         if let buffer = committedVertexBuffer, committedVertexCount > 0 {
             encoder.setVertexBuffer(buffer, offset: 0, index: 0)
@@ -166,10 +219,16 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
         var vertices: [StrokeRenderVertex] = []
         let color = UIColor(hex: stroke.color)?.withAlphaComponent(stroke.opacity) ?? .black
         let rgba = color.premultipliedRGBA
+        let style: Float = stroke.style == .pencil ? 1.0 : 0.0
 
         for triangle in StrokeMeshBuilder.triangles(for: stroke) {
             vertices.append(contentsOf: triangle.map { point in
-                StrokeRenderVertex(position: normalizedPoint(point, in: view.bounds), color: rgba)
+                StrokeRenderVertex(
+                    position: normalizedPoint(point, in: view.bounds),
+                    canvasPosition: SIMD2(Float(point.x), Float(point.y)),
+                    color: rgba,
+                    style: style
+                )
             })
         }
 
