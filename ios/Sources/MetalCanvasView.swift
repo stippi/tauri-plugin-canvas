@@ -213,11 +213,18 @@ final class MetalCanvasView: MTKView {
     }
 
     private func makeSample(from touch: UITouch) -> CanvasStrokeSample {
-        CanvasStrokeSample(
+        let roll: CGFloat
+        if #available(iOS 17.5, *) {
+            roll = touch.type == .pencil ? -touch.rollAngle : 0.0
+        } else {
+            roll = 0.0
+        }
+        return CanvasStrokeSample(
             location: touch.location(in: self),
             pressure: touch.maximumPossibleForce > 0 ? touch.force / touch.maximumPossibleForce : 0.5,
             altitude: touch.altitudeAngle,
             azimuth: touch.azimuthAngle(in: self),
+            roll: roll,
             timestamp: touch.timestamp
         )
     }

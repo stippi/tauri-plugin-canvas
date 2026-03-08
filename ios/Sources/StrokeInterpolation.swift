@@ -19,6 +19,7 @@ enum StrokeInterpolation {
                     pressure: current.pressure,
                     altitude: current.altitude,
                     azimuth: current.azimuth,
+                    roll: current.roll,
                     timestamp: current.timestamp
                 )
             )

@@ -9,6 +9,7 @@ using namespace metal;
 struct VertexIn {
   float2 position;
   float2 canvasPosition;
+  float2 localCoord;
   float4 color;
   float style;
 };
@@ -16,6 +17,7 @@ struct VertexIn {
 struct VertexOut {
   float4 position [[position]];
   float2 canvasPosition;
+  float2 localCoord;
   float4 color;
   float style;
 };
@@ -24,6 +26,7 @@ vertex VertexOut stroke_vertex(const device VertexIn* vertices [[buffer(0)]], ui
   VertexOut out;
   out.position = float4(vertices[id].position, 0.0, 1.0);
   out.canvasPosition = vertices[id].canvasPosition;
+  out.localCoord = vertices[id].localCoord;
   out.color = vertices[id].color;
   out.style = vertices[id].style;
   return out;
@@ -43,6 +46,17 @@ float smoothstep_safe(float edge0, float edge1, float x) {
   }
   float t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
   return t * t * (3.0 - 2.0 * t);
+}
+
+float marker_coverage(float2 localCoord, float2 canvasPosition) {
+  float coarseNoise = hash22(int2(floor(canvasPosition * 0.45)) + int2(41, 73));
+  float edgeNoise = hash22(int2(floor(canvasPosition * 1.9)) + int2(151, 227));
+  float distanceToEdge = max(abs(localCoord.x), abs(localCoord.y));
+  float fray = smoothstep_safe(0.56, 1.02, distanceToEdge);
+  float edgeThreshold = 0.84 + 0.1 * coarseNoise + 0.08 * edgeNoise * fray;
+  float edgeFade = 1.0 - smoothstep_safe(edgeThreshold, 1.08, distanceToEdge);
+  float bodyTexture = 0.9 + 0.1 * coarseNoise;
+  return clamp(edgeFade * bodyTexture, 0.0, 1.0);
 }
 
 float pencil_coverage(float paperHeight, float baseAlpha, float2 canvasPosition) {
@@ -65,12 +79,14 @@ float pencil_coverage(float paperHeight, float baseAlpha, float2 canvasPosition)
 
 fragment float4 stroke_fragment(VertexOut in [[stage_in]], texture2d<float> paperTexture [[texture(0)]]) {
   float4 color = in.color;
-  if (in.style > 0.5) {
+  if (in.style > 1.5) {
     constexpr sampler paperSampler(coord::normalized, filter::linear, address::repeat);
     float2 paperUV = fract((in.canvasPosition * 11.34) / 256.0);
     float paperHeight = paperTexture.sample(paperSampler, paperUV).r;
     float coverage = pencil_coverage(paperHeight, color.a, in.canvasPosition);
     color *= coverage;
+  } else if (in.style > 0.5) {
+    color *= marker_coverage(in.localCoord, in.canvasPosition);
   }
   return color;
 }
@@ -79,6 +95,7 @@ fragment float4 stroke_fragment(VertexOut in [[stage_in]], texture2d<float> pape
 struct StrokeRenderVertex {
     var position: SIMD2<Float>
     var canvasPosition: SIMD2<Float>
+    var localCoord: SIMD2<Float>
     var color: SIMD4<Float>
     var style: Float
 }
@@ -271,7 +288,6 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
 
         var vertices: [StrokeRenderVertex] = []
         let color = UIColor(hex: stroke.color) ?? .black
-        let style: Float = stroke.style == .pencil ? 1.0 : 0.0
 
         let meshTriangles: [[StrokeMeshVertex]]
         if stroke.style == .pencil {
@@ -292,13 +308,71 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
                 return StrokeRenderVertex(
                     position: normalizedPoint(vertex.point, in: view.bounds),
                     canvasPosition: SIMD2(Float(vertex.point.x), Float(vertex.point.y)),
+                    localCoord: .zero,
                     color: color.premultipliedRGBA(alpha: alpha),
-                    style: style
+                    style: stroke.style == .pencil ? 2.0 : 0.0
                 )
             })
         }
 
+        if stroke.style == .marker {
+            vertices = makeMarkerVertices(for: stroke, in: view)
+        }
+
         return vertices
+    }
+
+    private func makeMarkerVertices(for stroke: ActiveStroke, in view: UIView) -> [StrokeRenderVertex] {
+        let color = UIColor(hex: stroke.color) ?? .black
+        var vertices: [StrokeRenderVertex] = []
+
+        for dab in MarkerBrush.dabs(for: stroke) {
+            let corners = markerQuad(for: dab)
+            let localCoords: [SIMD2<Float>] = [
+                SIMD2(-1, -1),
+                SIMD2(1, -1),
+                SIMD2(1, 1),
+                SIMD2(-1, 1),
+            ]
+            let alpha = dab.opacity
+            let rgba = color.premultipliedRGBA(alpha: alpha)
+
+            let quadVertices = zip(corners, localCoords).map { point, local in
+                StrokeRenderVertex(
+                    position: normalizedPoint(point, in: view.bounds),
+                    canvasPosition: SIMD2(Float(point.x), Float(point.y)),
+                    localCoord: local,
+                    color: rgba,
+                    style: 1.0
+                )
+            }
+            vertices.append(quadVertices[0])
+            vertices.append(quadVertices[1])
+            vertices.append(quadVertices[2])
+            vertices.append(quadVertices[0])
+            vertices.append(quadVertices[2])
+            vertices.append(quadVertices[3])
+        }
+
+        return vertices
+    }
+
+    private func markerQuad(for dab: MarkerDab) -> [CGPoint] {
+        let corners = [
+            CGPoint(x: -dab.halfWidth, y: -dab.halfHeight),
+            CGPoint(x: dab.halfWidth, y: -dab.halfHeight),
+            CGPoint(x: dab.halfWidth, y: dab.halfHeight),
+            CGPoint(x: -dab.halfWidth, y: dab.halfHeight),
+        ]
+        return corners.map { corner in
+            let cosine = cos(dab.angle)
+            let sine = sin(dab.angle)
+            let rotated = CGPoint(
+                x: corner.x * cosine - corner.y * sine,
+                y: corner.x * sine + corner.y * cosine
+            )
+            return CGPoint(x: dab.center.x + rotated.x, y: dab.center.y + rotated.y)
+        }
     }
 
     private func normalizedPoint(_ point: CGPoint, in bounds: CGRect) -> SIMD2<Float> {

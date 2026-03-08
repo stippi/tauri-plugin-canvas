@@ -66,6 +66,7 @@ struct CanvasStrokeSample {
     let pressure: CGFloat
     let altitude: CGFloat
     let azimuth: CGFloat
+    let roll: CGFloat
     let timestamp: TimeInterval
 }
 
@@ -145,6 +146,10 @@ final class StrokeStorage {
     }
 
     func boundingBox(for stroke: ActiveStroke) -> CGRect {
+        if stroke.style == .marker {
+            return MarkerBrush.bounds(for: stroke)
+        }
+
         if stroke.points.count == 1, let point = stroke.points.first {
             let radius = max(1.0, stroke.baseWidth * 0.5)
             return CGRect(
@@ -169,6 +174,9 @@ final class StrokeStorage {
 
     func lastStrokeFragment(in bounds: CGRect) -> CanvasStrokeFragment? {
         guard let stroke = committedStrokes.last else { return nil }
+        if stroke.style == .marker {
+            return lastMarkerStrokeFragment(stroke, in: bounds)
+        }
         let box = boundingBox(for: stroke)
         let padding = max(8.0, stroke.baseWidth * 3.0)
         let clippedBox = box.insetBy(dx: -padding, dy: -padding).intersection(bounds)
@@ -184,6 +192,27 @@ final class StrokeStorage {
                 y: normalize(clippedBox.origin.y - bounds.minY, within: bounds.height),
                 width: normalize(clippedBox.width, within: bounds.width),
                 height: normalize(clippedBox.height, within: bounds.height)
+            ),
+            imageData: data
+        )
+    }
+
+    private func lastMarkerStrokeFragment(_ stroke: ActiveStroke, in bounds: CGRect) -> CanvasStrokeFragment? {
+        guard let fragment = renderMarkerStrokeFragment(stroke, in: bounds) else {
+            return nil
+        }
+
+        guard let data = fragment.image.pngData()?.base64EncodedString() else {
+            return nil
+        }
+
+        return CanvasStrokeFragment(
+            strokeId: stroke.id,
+            boundingBox: CanvasRect(
+                x: normalize(fragment.bounds.origin.x - bounds.minX, within: bounds.width),
+                y: normalize(fragment.bounds.origin.y - bounds.minY, within: bounds.height),
+                width: normalize(fragment.bounds.width, within: bounds.width),
+                height: normalize(fragment.bounds.height, within: bounds.height)
             ),
             imageData: data
         )
@@ -377,41 +406,91 @@ extension StrokeStorage {
 
     private func renderMarkerStroke(_ stroke: ActiveStroke, in context: CGContext, offset: CGPoint) {
         let scale = context.ctm.a == 0 ? UIScreen.main.scale : abs(context.ctm.a)
-        let shapeBounds = boundingBox(for: stroke).offsetBy(dx: -offset.x, dy: -offset.y)
-        let paddedBounds = shapeBounds.insetBy(dx: -max(4.0, stroke.baseWidth), dy: -max(4.0, stroke.baseWidth))
-        guard paddedBounds.width > 0, paddedBounds.height > 0 else {
+        guard let raster = markerRaster(
+            for: stroke,
+            fragmentOrigin: offset,
+            scale: scale,
+            extraPadding: max(4.0, stroke.baseWidth)
+        ) else {
             return
+        }
+        guard let image = raster.image.cgImage else {
+            return
+        }
+
+        context.saveGState()
+        context.interpolationQuality = .high
+        context.draw(image, in: raster.bounds.offsetBy(dx: -offset.x, dy: -offset.y))
+        context.restoreGState()
+    }
+
+    private func renderMarkerStrokeFragment(_ stroke: ActiveStroke, in bounds: CGRect) -> (bounds: CGRect, image: UIImage)? {
+        let padding = max(8.0, stroke.baseWidth * 3.0)
+        let clipBounds = MarkerBrush.bounds(for: stroke).insetBy(dx: -padding, dy: -padding).intersection(bounds)
+        guard clipBounds.width > 0, clipBounds.height > 0 else {
+            return nil
+        }
+        return markerRaster(
+            for: stroke,
+            fragmentOrigin: clipBounds.origin,
+            scale: UIScreen.main.scale,
+            extraPadding: 0
+        ).map {
+            (bounds: $0.bounds, image: $0.image)
+        }
+    }
+
+    private func markerRaster(
+        for stroke: ActiveStroke,
+        fragmentOrigin: CGPoint,
+        scale: CGFloat,
+        extraPadding: CGFloat
+    ) -> (bounds: CGRect, image: UIImage)? {
+        let shapeBounds = MarkerBrush.bounds(for: stroke).offsetBy(dx: -fragmentOrigin.x, dy: -fragmentOrigin.y)
+        let paddedBounds = shapeBounds.insetBy(dx: -extraPadding, dy: -extraPadding)
+        guard paddedBounds.width > 0, paddedBounds.height > 0 else {
+            return nil
         }
 
         let pixelWidth = max(1, Int(ceil(paddedBounds.width * scale)))
         let pixelHeight = max(1, Int(ceil(paddedBounds.height * scale)))
         let maskBytesPerRow = pixelWidth
         var maskPixels = [UInt8](repeating: 0, count: pixelWidth * pixelHeight)
+        let dabs = MarkerBrush.dabs(for: stroke)
 
-        guard
-            let maskContext = CGContext(
-                data: &maskPixels,
-                width: pixelWidth,
-                height: pixelHeight,
-                bitsPerComponent: 8,
-                bytesPerRow: maskBytesPerRow,
-                space: CGColorSpaceCreateDeviceGray(),
-                bitmapInfo: CGImageAlphaInfo.none.rawValue
+        for dab in dabs {
+            let dabBounds = CGRect(
+                x: dab.center.x - dab.halfWidth - stroke.baseWidth,
+                y: dab.center.y - dab.halfHeight - stroke.baseWidth,
+                width: dab.halfWidth * 2 + stroke.baseWidth * 2,
+                height: dab.halfHeight * 2 + stroke.baseWidth * 2
             )
-        else {
-            return
-        }
+            let localMinX = max(0, Int(floor((dabBounds.minX - fragmentOrigin.x - paddedBounds.minX) * scale)))
+            let localMaxX = min(pixelWidth - 1, Int(ceil((dabBounds.maxX - fragmentOrigin.x - paddedBounds.minX) * scale)))
+            let localMinY = max(0, Int(floor((dabBounds.minY - fragmentOrigin.y - paddedBounds.minY) * scale)))
+            let localMaxY = min(pixelHeight - 1, Int(ceil((dabBounds.maxY - fragmentOrigin.y - paddedBounds.minY) * scale)))
+            guard localMinX <= localMaxX, localMinY <= localMaxY else { continue }
 
-        maskContext.setAllowsAntialiasing(true)
-        maskContext.setShouldAntialias(true)
-        maskContext.interpolationQuality = .high
-        maskContext.translateBy(x: -paddedBounds.minX * scale, y: -paddedBounds.minY * scale)
-        maskContext.scaleBy(x: scale, y: scale)
-        drawStrokeShape(stroke, in: maskContext, offset: offset, fillColor: UIColor.white.cgColor)
+            for y in localMinY...localMaxY {
+                for x in localMinX...localMaxX {
+                    let worldPoint = CGPoint(
+                        x: fragmentOrigin.x + paddedBounds.minX + (CGFloat(x) + 0.5) / scale,
+                        y: fragmentOrigin.y + paddedBounds.minY + (CGFloat(y) + 0.5) / scale
+                    )
+                    let alpha = MarkerBrush.coverage(at: worldPoint, dab: dab) * dab.opacity
+                    guard alpha > 0 else { continue }
+                    let index = y * maskBytesPerRow + x
+                    let alphaByte = UInt8(max(0, min(255, Int(round(alpha * 255.0)))))
+                    if alphaByte > maskPixels[index] {
+                        maskPixels[index] = alphaByte
+                    }
+                }
+            }
+        }
 
         let bytesPerRow = pixelWidth * 4
         var colorPixels = [UInt8](repeating: 0, count: pixelWidth * pixelHeight * 4)
-        guard let color = UIColor(hex: stroke.color) else { return }
+        guard let color = UIColor(hex: stroke.color) else { return nil }
         var red: CGFloat = 0
         var green: CGFloat = 0
         var blue: CGFloat = 0
@@ -424,7 +503,7 @@ extension StrokeStorage {
                 let maskAlpha = CGFloat(maskPixels[maskIndex]) / 255.0
                 guard maskAlpha > 0 else { continue }
 
-                let finalAlpha = min(1.0, maskAlpha * stroke.opacity)
+                let finalAlpha = min(1.0, maskAlpha)
                 let premultipliedRed = UInt8(max(0, min(255, Int(round(red * finalAlpha * 255.0)))))
                 let premultipliedGreen = UInt8(max(0, min(255, Int(round(green * finalAlpha * 255.0)))))
                 let premultipliedBlue = UInt8(max(0, min(255, Int(round(blue * finalAlpha * 255.0)))))
@@ -449,13 +528,18 @@ extension StrokeStorage {
             ),
             let image = outputContext.makeImage()
         else {
-            return
+            return nil
         }
 
-        context.saveGState()
-        context.interpolationQuality = .high
-        context.draw(image, in: paddedBounds)
-        context.restoreGState()
+        return (
+            bounds: CGRect(
+                x: fragmentOrigin.x + paddedBounds.minX,
+                y: fragmentOrigin.y + paddedBounds.minY,
+                width: paddedBounds.width,
+                height: paddedBounds.height
+            ),
+            image: UIImage(cgImage: image, scale: scale, orientation: .up)
+        )
     }
 
     private func drawPencilPressureMask(_ stroke: ActiveStroke, in context: CGContext, offset: CGPoint) {
