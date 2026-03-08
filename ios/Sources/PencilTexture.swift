@@ -50,9 +50,10 @@ enum PencilTexture {
             Int(floor(scaledPoint.x * 4.8)) + 211,
             Int(floor(scaledPoint.y * 4.8)) + 163
         ))
-        let clump = clumpNoise * (0.28 + 0.72 * clumpNoise)
-        let gaps = smoothstep(0.42, 0.86, tooth + 0.45 * microNoise + 0.2 * gapNoise - 0.38)
-        let coverage = tooth * (0.08 + 0.92 * clump) * gaps
+        let dense = 0.32 + 0.68 * smoothstep(0.18, 0.78, clumpNoise)
+        let speckle = 0.62 + 0.38 * microNoise
+        let gaps = smoothstep(0.58, 0.93, tooth + 0.45 * microNoise + 0.18 * gapNoise - 0.34)
+        let coverage = tooth * dense * speckle * gaps
         return clamp01(coverage)
     }
 

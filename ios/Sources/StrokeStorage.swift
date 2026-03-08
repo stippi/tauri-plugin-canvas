@@ -40,6 +40,7 @@ struct CanvasPenConfig: Decodable {
 
     enum Style: String, Decodable {
         case smooth
+        case marker
         case pencil
     }
 
@@ -252,6 +253,10 @@ extension StrokeStorage {
             renderPencilStroke(stroke, in: context, offset: offset)
             return
         }
+        if stroke.style == .marker {
+            renderMarkerStroke(stroke, in: context, offset: offset)
+            return
+        }
 
         guard let color = UIColor(hex: stroke.color)?.withAlphaComponent(stroke.opacity).cgColor else {
             return
@@ -314,7 +319,7 @@ extension StrokeStorage {
         maskContext.interpolationQuality = .high
         maskContext.translateBy(x: -paddedBounds.minX * scale, y: -paddedBounds.minY * scale)
         maskContext.scaleBy(x: scale, y: scale)
-        drawStrokeShape(stroke, in: maskContext, offset: offset, fillColor: UIColor.white.cgColor)
+        drawPencilPressureMask(stroke, in: maskContext, offset: offset)
 
         let bytesPerRow = pixelWidth * 4
         var colorPixels = [UInt8](repeating: 0, count: pixelWidth * pixelHeight * 4)
@@ -335,8 +340,8 @@ extension StrokeStorage {
                     x: offset.x + paddedBounds.minX + (CGFloat(x) + 0.5) / scale,
                     y: offset.y + paddedBounds.minY + (CGFloat(y) + 0.5) / scale
                 )
-                let coverage = PencilTexture.coverage(at: worldPoint, baseAlpha: stroke.opacity)
-                let finalAlpha = min(1.0, maskAlpha * stroke.opacity * coverage)
+                let coverage = PencilTexture.coverage(at: worldPoint, baseAlpha: maskAlpha)
+                let finalAlpha = min(1.0, maskAlpha * coverage)
                 let premultipliedRed = UInt8(max(0, min(255, Int(round(red * finalAlpha * 255.0)))))
                 let premultipliedGreen = UInt8(max(0, min(255, Int(round(green * finalAlpha * 255.0)))))
                 let premultipliedBlue = UInt8(max(0, min(255, Int(round(blue * finalAlpha * 255.0)))))
@@ -368,6 +373,139 @@ extension StrokeStorage {
         context.interpolationQuality = .high
         context.draw(image, in: paddedBounds)
         context.restoreGState()
+    }
+
+    private func renderMarkerStroke(_ stroke: ActiveStroke, in context: CGContext, offset: CGPoint) {
+        let scale = context.ctm.a == 0 ? UIScreen.main.scale : abs(context.ctm.a)
+        let shapeBounds = boundingBox(for: stroke).offsetBy(dx: -offset.x, dy: -offset.y)
+        let paddedBounds = shapeBounds.insetBy(dx: -max(4.0, stroke.baseWidth), dy: -max(4.0, stroke.baseWidth))
+        guard paddedBounds.width > 0, paddedBounds.height > 0 else {
+            return
+        }
+
+        let pixelWidth = max(1, Int(ceil(paddedBounds.width * scale)))
+        let pixelHeight = max(1, Int(ceil(paddedBounds.height * scale)))
+        let maskBytesPerRow = pixelWidth
+        var maskPixels = [UInt8](repeating: 0, count: pixelWidth * pixelHeight)
+
+        guard
+            let maskContext = CGContext(
+                data: &maskPixels,
+                width: pixelWidth,
+                height: pixelHeight,
+                bitsPerComponent: 8,
+                bytesPerRow: maskBytesPerRow,
+                space: CGColorSpaceCreateDeviceGray(),
+                bitmapInfo: CGImageAlphaInfo.none.rawValue
+            )
+        else {
+            return
+        }
+
+        maskContext.setAllowsAntialiasing(true)
+        maskContext.setShouldAntialias(true)
+        maskContext.interpolationQuality = .high
+        maskContext.translateBy(x: -paddedBounds.minX * scale, y: -paddedBounds.minY * scale)
+        maskContext.scaleBy(x: scale, y: scale)
+        drawStrokeShape(stroke, in: maskContext, offset: offset, fillColor: UIColor.white.cgColor)
+
+        let bytesPerRow = pixelWidth * 4
+        var colorPixels = [UInt8](repeating: 0, count: pixelWidth * pixelHeight * 4)
+        guard let color = UIColor(hex: stroke.color) else { return }
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+
+        for y in 0..<pixelHeight {
+            for x in 0..<pixelWidth {
+                let maskIndex = y * maskBytesPerRow + x
+                let maskAlpha = CGFloat(maskPixels[maskIndex]) / 255.0
+                guard maskAlpha > 0 else { continue }
+
+                let finalAlpha = min(1.0, maskAlpha * stroke.opacity)
+                let premultipliedRed = UInt8(max(0, min(255, Int(round(red * finalAlpha * 255.0)))))
+                let premultipliedGreen = UInt8(max(0, min(255, Int(round(green * finalAlpha * 255.0)))))
+                let premultipliedBlue = UInt8(max(0, min(255, Int(round(blue * finalAlpha * 255.0)))))
+                let alphaByte = UInt8(max(0, min(255, Int(round(finalAlpha * 255.0)))))
+                let pixelIndex = (y * pixelWidth + x) * 4
+                colorPixels[pixelIndex] = premultipliedRed
+                colorPixels[pixelIndex + 1] = premultipliedGreen
+                colorPixels[pixelIndex + 2] = premultipliedBlue
+                colorPixels[pixelIndex + 3] = alphaByte
+            }
+        }
+
+        guard
+            let outputContext = CGContext(
+                data: &colorPixels,
+                width: pixelWidth,
+                height: pixelHeight,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+            ),
+            let image = outputContext.makeImage()
+        else {
+            return
+        }
+
+        context.saveGState()
+        context.interpolationQuality = .high
+        context.draw(image, in: paddedBounds)
+        context.restoreGState()
+    }
+
+    private func drawPencilPressureMask(_ stroke: ActiveStroke, in context: CGContext, offset: CGPoint) {
+        if stroke.points.count == 1, let point = stroke.points.first {
+            let translated = CGPoint(x: point.location.x - offset.x, y: point.location.y - offset.y)
+            let radius = max(1.0, stroke.baseWidth * 0.5)
+            let alpha = stroke.opacity * StrokeMeshBuilder.pressureOpacity(for: point.pressure)
+            context.setFillColor(UIColor(white: 1.0, alpha: alpha).cgColor)
+            context.fillEllipse(in: CGRect(
+                x: translated.x - radius,
+                y: translated.y - radius,
+                width: radius * 2,
+                height: radius * 2
+            ))
+            return
+        }
+
+        let points = StrokeInterpolation.smoothedPoints(stroke.points)
+        guard points.count >= 2 else { return }
+
+        for index in 1..<points.count {
+            let previous = points[index - 1]
+            let current = points[index]
+            let delta = CGPoint(
+                x: current.location.x - previous.location.x,
+                y: current.location.y - previous.location.y
+            )
+            let length = max(0.001, sqrt(delta.x * delta.x + delta.y * delta.y))
+            let normal = CGPoint(x: -delta.y / length, y: delta.x / length)
+            let previousWidth = max(
+                1.0,
+                stroke.baseWidth * (1.0 + (previous.pressure - 0.5) * stroke.pressureSensitivity)
+            )
+            let currentWidth = max(
+                1.0,
+                stroke.baseWidth * (1.0 + (current.pressure - 0.5) * stroke.pressureSensitivity)
+            )
+            let previousOffset = CGPoint(x: normal.x * previousWidth * 0.5, y: normal.y * previousWidth * 0.5)
+            let currentOffset = CGPoint(x: normal.x * currentWidth * 0.5, y: normal.y * currentWidth * 0.5)
+            let alpha = stroke.opacity * StrokeMeshBuilder.pressureOpacity(for: (previous.pressure + current.pressure) * 0.5)
+
+            context.setFillColor(UIColor(white: 1.0, alpha: alpha).cgColor)
+            context.beginPath()
+            context.move(to: CGPoint(x: previous.location.x + previousOffset.x - offset.x, y: previous.location.y + previousOffset.y - offset.y))
+            context.addLine(to: CGPoint(x: current.location.x + currentOffset.x - offset.x, y: current.location.y + currentOffset.y - offset.y))
+            context.addLine(to: CGPoint(x: current.location.x - currentOffset.x - offset.x, y: current.location.y - currentOffset.y - offset.y))
+            context.addLine(to: CGPoint(x: previous.location.x - previousOffset.x - offset.x, y: previous.location.y - previousOffset.y - offset.y))
+            context.closePath()
+            context.fillPath()
+        }
     }
 
     private func drawStrokeShape(_ stroke: ActiveStroke, in context: CGContext, offset: CGPoint, fillColor: CGColor) {

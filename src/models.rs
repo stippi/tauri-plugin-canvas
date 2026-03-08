@@ -58,6 +58,7 @@ impl Default for PenTool {
 #[serde(rename_all = "camelCase")]
 pub enum PenStyle {
     Smooth,
+    Marker,
     Pencil,
 }
 

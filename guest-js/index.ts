@@ -25,7 +25,7 @@ export interface CanvasConfig {
 
 export interface PenConfig {
   tool?: "draw" | "erase";
-  style?: "smooth" | "pencil";
+  style?: "smooth" | "marker" | "pencil";
   color?: string;
   width?: number;
   opacity?: number;

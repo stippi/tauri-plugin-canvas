@@ -57,9 +57,10 @@ float pencil_coverage(float paperHeight, float baseAlpha, float2 canvasPosition)
   float clumpNoise = hash22(clumpCoord);
   float microNoise = hash22(microCoord);
   float gapNoise = hash22(gapCoord);
-  float clump = clumpNoise * (0.28 + 0.72 * clumpNoise);
-  float gaps = smoothstep_safe(0.42, 0.86, tooth + 0.45 * microNoise + 0.2 * gapNoise - 0.38);
-  return clamp(tooth * (0.08 + 0.92 * clump) * gaps, 0.0, 1.0);
+  float dense = 0.32 + 0.68 * smoothstep_safe(0.18, 0.78, clumpNoise);
+  float speckle = 0.62 + 0.38 * microNoise;
+  float gaps = smoothstep_safe(0.58, 0.93, tooth + 0.45 * microNoise + 0.18 * gapNoise - 0.34);
+  return clamp(tooth * dense * speckle * gaps, 0.0, 1.0);
 }
 
 fragment float4 stroke_fragment(VertexOut in [[stage_in]], texture2d<float> paperTexture [[texture(0)]]) {
@@ -85,12 +86,17 @@ struct StrokeRenderVertex {
 final class StrokeRenderer: NSObject, MTKViewDelegate {
     private weak var metalView: MTKView?
     private let commandQueue: MTLCommandQueue
-    private let pipelineState: MTLRenderPipelineState
+    private let normalPipelineState: MTLRenderPipelineState
+    private let markerPipelineState: MTLRenderPipelineState
     private let paperTexture: MTLTexture
-    private var committedVertexBuffer: MTLBuffer?
-    private var activeVertexBuffer: MTLBuffer?
-    private var committedVertexCount = 0
-    private var activeVertexCount = 0
+    private var committedNormalVertexBuffer: MTLBuffer?
+    private var committedMarkerVertexBuffer: MTLBuffer?
+    private var activeNormalVertexBuffer: MTLBuffer?
+    private var activeMarkerVertexBuffer: MTLBuffer?
+    private var committedNormalVertexCount = 0
+    private var committedMarkerVertexCount = 0
+    private var activeNormalVertexCount = 0
+    private var activeMarkerVertexCount = 0
 
     enum RenderMode {
         case idle
@@ -112,57 +118,91 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
             return nil
         }
 
-        let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.vertexFunction = vertexFunction
-        descriptor.fragmentFunction = fragmentFunction
-        descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-        descriptor.rasterSampleCount = metalView.sampleCount
-        descriptor.colorAttachments[0].isBlendingEnabled = true
-        descriptor.colorAttachments[0].rgbBlendOperation = .add
-        descriptor.colorAttachments[0].alphaBlendOperation = .add
-        descriptor.colorAttachments[0].sourceRGBBlendFactor = .one
-        descriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
-        descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
-        descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        let normalDescriptor = MTLRenderPipelineDescriptor()
+        normalDescriptor.vertexFunction = vertexFunction
+        normalDescriptor.fragmentFunction = fragmentFunction
+        normalDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        normalDescriptor.rasterSampleCount = metalView.sampleCount
+        normalDescriptor.colorAttachments[0].isBlendingEnabled = true
+        normalDescriptor.colorAttachments[0].rgbBlendOperation = .add
+        normalDescriptor.colorAttachments[0].alphaBlendOperation = .add
+        normalDescriptor.colorAttachments[0].sourceRGBBlendFactor = .one
+        normalDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
+        normalDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        normalDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
 
-        guard let pipelineState = try? device.makeRenderPipelineState(descriptor: descriptor) else {
+        let markerDescriptor = MTLRenderPipelineDescriptor()
+        markerDescriptor.vertexFunction = vertexFunction
+        markerDescriptor.fragmentFunction = fragmentFunction
+        markerDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        markerDescriptor.rasterSampleCount = metalView.sampleCount
+        markerDescriptor.colorAttachments[0].isBlendingEnabled = true
+        markerDescriptor.colorAttachments[0].rgbBlendOperation = .max
+        markerDescriptor.colorAttachments[0].alphaBlendOperation = .max
+        markerDescriptor.colorAttachments[0].sourceRGBBlendFactor = .one
+        markerDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
+        markerDescriptor.colorAttachments[0].destinationRGBBlendFactor = .one
+        markerDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .one
+
+        guard
+            let normalPipelineState = try? device.makeRenderPipelineState(descriptor: normalDescriptor),
+            let markerPipelineState = try? device.makeRenderPipelineState(descriptor: markerDescriptor)
+        else {
             return nil
         }
 
         self.metalView = metalView
         self.commandQueue = commandQueue
-        self.pipelineState = pipelineState
+        self.normalPipelineState = normalPipelineState
+        self.markerPipelineState = markerPipelineState
         self.paperTexture = paperTexture
         super.init()
     }
 
     func update(committed: [ActiveStroke], active: ActiveStroke?) {
         guard let device = metalView?.device else { return }
-        let committedVertices = committed.flatMap(makeVertices(for:))
-        committedVertexCount = committedVertices.count
-        if !committedVertices.isEmpty {
-            committedVertexBuffer = device.makeBuffer(
-                bytes: committedVertices,
-                length: MemoryLayout<StrokeRenderVertex>.stride * committedVertices.count
-            )
-        } else {
-            committedVertexBuffer = nil
-        }
+        let committedNormalVertices = committed
+            .filter { $0.style != .marker }
+            .flatMap(makeVertices(for:))
+        committedNormalVertexCount = committedNormalVertices.count
+        committedNormalVertexBuffer = committedNormalVertices.isEmpty ? nil : device.makeBuffer(
+            bytes: committedNormalVertices,
+            length: MemoryLayout<StrokeRenderVertex>.stride * committedNormalVertices.count
+        )
+
+        let committedMarkerVertices = committed
+            .filter { $0.style == .marker }
+            .flatMap(makeVertices(for:))
+        committedMarkerVertexCount = committedMarkerVertices.count
+        committedMarkerVertexBuffer = committedMarkerVertices.isEmpty ? nil : device.makeBuffer(
+            bytes: committedMarkerVertices,
+            length: MemoryLayout<StrokeRenderVertex>.stride * committedMarkerVertices.count
+        )
 
         if let active {
             let activeVertices = makeVertices(for: active)
-            activeVertexCount = activeVertices.count
-            if !activeVertices.isEmpty {
-                activeVertexBuffer = device.makeBuffer(
+            if active.style == .marker {
+                activeNormalVertexCount = 0
+                activeNormalVertexBuffer = nil
+                activeMarkerVertexCount = activeVertices.count
+                activeMarkerVertexBuffer = activeVertices.isEmpty ? nil : device.makeBuffer(
                     bytes: activeVertices,
                     length: MemoryLayout<StrokeRenderVertex>.stride * activeVertices.count
                 )
             } else {
-                activeVertexBuffer = nil
+                activeMarkerVertexCount = 0
+                activeMarkerVertexBuffer = nil
+                activeNormalVertexCount = activeVertices.count
+                activeNormalVertexBuffer = activeVertices.isEmpty ? nil : device.makeBuffer(
+                    bytes: activeVertices,
+                    length: MemoryLayout<StrokeRenderVertex>.stride * activeVertices.count
+                )
             }
         } else {
-            activeVertexCount = 0
-            activeVertexBuffer = nil
+            activeNormalVertexCount = 0
+            activeMarkerVertexCount = 0
+            activeNormalVertexBuffer = nil
+            activeMarkerVertexBuffer = nil
         }
     }
 
@@ -191,17 +231,30 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
             return
         }
 
-        encoder.setRenderPipelineState(pipelineState)
         encoder.setFragmentTexture(paperTexture, index: 0)
 
-        if let buffer = committedVertexBuffer, committedVertexCount > 0 {
+        if let buffer = committedNormalVertexBuffer, committedNormalVertexCount > 0 {
+            encoder.setRenderPipelineState(normalPipelineState)
             encoder.setVertexBuffer(buffer, offset: 0, index: 0)
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: committedVertexCount)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: committedNormalVertexCount)
         }
 
-        if let buffer = activeVertexBuffer, activeVertexCount > 0 {
+        if let buffer = activeNormalVertexBuffer, activeNormalVertexCount > 0 {
+            encoder.setRenderPipelineState(normalPipelineState)
             encoder.setVertexBuffer(buffer, offset: 0, index: 0)
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: activeVertexCount)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: activeNormalVertexCount)
+        }
+
+        if let buffer = committedMarkerVertexBuffer, committedMarkerVertexCount > 0 {
+            encoder.setRenderPipelineState(markerPipelineState)
+            encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: committedMarkerVertexCount)
+        }
+
+        if let buffer = activeMarkerVertexBuffer, activeMarkerVertexCount > 0 {
+            encoder.setRenderPipelineState(markerPipelineState)
+            encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: activeMarkerVertexCount)
         }
 
         encoder.endEncoding()
@@ -217,16 +270,29 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
         guard let view = metalView else { return [] }
 
         var vertices: [StrokeRenderVertex] = []
-        let color = UIColor(hex: stroke.color)?.withAlphaComponent(stroke.opacity) ?? .black
-        let rgba = color.premultipliedRGBA
+        let color = UIColor(hex: stroke.color) ?? .black
         let style: Float = stroke.style == .pencil ? 1.0 : 0.0
 
-        for triangle in StrokeMeshBuilder.triangles(for: stroke) {
-            vertices.append(contentsOf: triangle.map { point in
-                StrokeRenderVertex(
-                    position: normalizedPoint(point, in: view.bounds),
-                    canvasPosition: SIMD2(Float(point.x), Float(point.y)),
-                    color: rgba,
+        let meshTriangles: [[StrokeMeshVertex]]
+        if stroke.style == .pencil {
+            meshTriangles = StrokeMeshBuilder.meshTriangles(for: stroke)
+        } else {
+            meshTriangles = StrokeMeshBuilder.triangles(for: stroke).map { triangle in
+                triangle.map { point in
+                    StrokeMeshVertex(point: point, pressure: 1.0)
+                }
+            }
+        }
+
+        for triangle in meshTriangles {
+            vertices.append(contentsOf: triangle.map { vertex in
+                let alpha = stroke.style == .pencil
+                    ? stroke.opacity * StrokeMeshBuilder.pressureOpacity(for: vertex.pressure)
+                    : stroke.opacity
+                return StrokeRenderVertex(
+                    position: normalizedPoint(vertex.point, in: view.bounds),
+                    canvasPosition: SIMD2(Float(vertex.point.x), Float(vertex.point.y)),
+                    color: color.premultipliedRGBA(alpha: alpha),
                     style: style
                 )
             })
@@ -243,17 +309,18 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
 }
 
 private extension UIColor {
-    var premultipliedRGBA: SIMD4<Float> {
+    func premultipliedRGBA(alpha: CGFloat) -> SIMD4<Float> {
         var red: CGFloat = 0
         var green: CGFloat = 0
         var blue: CGFloat = 0
-        var alpha: CGFloat = 0
-        getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        var baseAlpha: CGFloat = 0
+        getRed(&red, green: &green, blue: &blue, alpha: &baseAlpha)
+        let finalAlpha = max(0.0, min(1.0, alpha * baseAlpha))
         return SIMD4(
-            Float(red * alpha),
-            Float(green * alpha),
-            Float(blue * alpha),
-            Float(alpha)
+            Float(red * finalAlpha),
+            Float(green * finalAlpha),
+            Float(blue * finalAlpha),
+            Float(finalAlpha)
         )
     }
 }
