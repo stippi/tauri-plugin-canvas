@@ -4,6 +4,9 @@ import UIKit
 protocol MetalCanvasViewDelegate: AnyObject {
     func metalCanvasView(_ view: MetalCanvasView, didStartStroke strokeId: String)
     func metalCanvasView(_ view: MetalCanvasView, didEndStroke stroke: CanvasStroke)
+    func metalCanvasView(_ view: MetalCanvasView, didStartEraserStroke stroke: ActiveEraserStroke)
+    func metalCanvasView(_ view: MetalCanvasView, didSampleEraserStroke strokeId: String, samples: [CanvasStrokeSample], baseWidth: CGFloat, pressureSensitivity: CGFloat)
+    func metalCanvasView(_ view: MetalCanvasView, didEndEraserStroke strokeId: String)
     func metalCanvasViewDidClear(_ view: MetalCanvasView)
 }
 
@@ -18,6 +21,7 @@ final class MetalCanvasView: MTKView {
     private lazy var strokeRecognizer = StrokeGestureRecognizer(target: self, action: #selector(handleStroke(_:)))
     private var strokeRenderer: StrokeRenderer?
     private var handoffStroke: ActiveStroke?
+    private var activeEraserStroke: ActiveEraserStroke?
     private var handoffOpacity: CGFloat = 1.0
     private var handoffDisplayLink: CADisplayLink?
     private var handoffFadeStartTime: CFTimeInterval?
@@ -77,6 +81,7 @@ final class MetalCanvasView: MTKView {
 
     func clearStrokes() {
         clearHandoffStroke()
+        activeEraserStroke = nil
         strokeStorage.clear()
         rebuildRenderer(mode: .dirty)
         strokeDelegate?.metalCanvasViewDidClear(self)
@@ -84,12 +89,14 @@ final class MetalCanvasView: MTKView {
 
     func undoStroke() {
         clearHandoffStroke()
+        activeEraserStroke = nil
         guard strokeStorage.undo() else { return }
         rebuildRenderer(mode: .dirty)
     }
 
     func redoStroke() {
         clearHandoffStroke()
+        activeEraserStroke = nil
         guard strokeStorage.redo() else { return }
         rebuildRenderer(mode: .dirty)
     }
@@ -115,36 +122,89 @@ final class MetalCanvasView: MTKView {
             clearHandoffStroke()
             let sample = makeSample(from: touch)
             guard drawingRect.contains(sample.location) else { return }
-            let strokeId = strokeStorage.beginStroke(sample: sample, pen: penConfig)
-            rebuildRenderer(mode: .drawing)
-            strokeDelegate?.metalCanvasView(self, didStartStroke: strokeId)
+            if penConfig.tool == .erase {
+                let stroke = ActiveEraserStroke(
+                    id: UUID().uuidString,
+                    points: [sample],
+                    baseWidth: penConfig.width ?? CanvasPenConfig.default.width ?? 12.0,
+                    pressureSensitivity: penConfig.pressureSensitivity ?? CanvasPenConfig.default.pressureSensitivity ?? 0.25
+                )
+                activeEraserStroke = stroke
+                rebuildRenderer(mode: .dirty)
+                strokeDelegate?.metalCanvasView(self, didStartEraserStroke: stroke)
+                strokeDelegate?.metalCanvasView(
+                    self,
+                    didSampleEraserStroke: stroke.id,
+                    samples: [sample],
+                    baseWidth: stroke.baseWidth,
+                    pressureSensitivity: stroke.pressureSensitivity
+                )
+            } else {
+                let strokeId = strokeStorage.beginStroke(sample: sample, pen: penConfig)
+                rebuildRenderer(mode: .drawing)
+                strokeDelegate?.metalCanvasView(self, didStartStroke: strokeId)
+            }
 
         case .changed:
             let samples = touches.map(makeSample).filter { drawingRect.contains($0.location) }
             guard !samples.isEmpty else { return }
-            samples.forEach { strokeStorage.append(sample: $0) }
-            rebuildRenderer(mode: .drawing)
+            if penConfig.tool == .erase {
+                guard var stroke = activeEraserStroke else { return }
+                stroke.points.append(contentsOf: samples)
+                activeEraserStroke = stroke
+                strokeDelegate?.metalCanvasView(
+                    self,
+                    didSampleEraserStroke: stroke.id,
+                    samples: samples,
+                    baseWidth: stroke.baseWidth,
+                    pressureSensitivity: stroke.pressureSensitivity
+                )
+            } else {
+                samples.forEach { strokeStorage.append(sample: $0) }
+                rebuildRenderer(mode: .drawing)
+            }
 
         case .ended:
             let samples = touches.map(makeSample).filter { drawingRect.contains($0.location) }
-            samples.forEach { strokeStorage.append(sample: $0) }
-            if let stroke = strokeStorage.finishStroke() {
-                handoffStroke = stroke
-                handoffOpacity = 1.0
-                rebuildRenderer(mode: .drawing)
-                startHandoffFade()
-                strokeDelegate?.metalCanvasView(self, didEndStroke: strokeStorage.exportStrokes(in: drawingRect).last ?? CanvasStroke(
-                    id: stroke.id,
-                    points: [],
-                    color: stroke.color,
-                    baseWidth: stroke.baseWidth,
-                    boundingBox: CanvasRect(x: 0, y: 0, width: 0, height: 0)
-                ))
+            if penConfig.tool == .erase {
+                guard var stroke = activeEraserStroke else { return }
+                if !samples.isEmpty {
+                    stroke.points.append(contentsOf: samples)
+                    activeEraserStroke = stroke
+                    strokeDelegate?.metalCanvasView(
+                        self,
+                        didSampleEraserStroke: stroke.id,
+                        samples: samples,
+                        baseWidth: stroke.baseWidth,
+                        pressureSensitivity: stroke.pressureSensitivity
+                    )
+                }
+                activeEraserStroke = nil
+                rebuildRenderer(mode: .dirty)
+                strokeDelegate?.metalCanvasView(self, didEndEraserStroke: stroke.id)
+            } else {
+                samples.forEach { strokeStorage.append(sample: $0) }
+                if let stroke = strokeStorage.finishStroke() {
+                    handoffStroke = stroke
+                    handoffOpacity = 1.0
+                    rebuildRenderer(mode: .drawing)
+                    startHandoffFade()
+                    strokeDelegate?.metalCanvasView(self, didEndStroke: strokeStorage.exportStrokes(in: drawingRect).last ?? CanvasStroke(
+                        id: stroke.id,
+                        points: [],
+                        color: stroke.color,
+                        baseWidth: stroke.baseWidth,
+                        boundingBox: CanvasRect(x: 0, y: 0, width: 0, height: 0)
+                    ))
+                }
             }
 
         case .cancelled, .failed:
             clearHandoffStroke()
-            _ = strokeStorage.finishStroke()
+            activeEraserStroke = nil
+            if penConfig.tool != .erase {
+                _ = strokeStorage.finishStroke()
+            }
             rebuildRenderer(mode: .dirty)
 
         default:

@@ -333,9 +333,73 @@ extension CanvasPlugin: MetalCanvasViewDelegate {
         )
     }
 
+    func metalCanvasView(_ view: MetalCanvasView, didStartEraserStroke stroke: ActiveEraserStroke) {
+        emitDebug("didStartEraserStroke \(stroke.id)")
+        emitEvent(
+            "eraserStrokeStarted",
+            data: [
+                "strokeId": stroke.id,
+                "baseWidth": Double(stroke.baseWidth),
+                "pressureSensitivity": Double(stroke.pressureSensitivity),
+            ] as JSObject
+        )
+    }
+
+    func metalCanvasView(
+        _ view: MetalCanvasView,
+        didSampleEraserStroke strokeId: String,
+        samples: [CanvasStrokeSample],
+        baseWidth: CGFloat,
+        pressureSensitivity: CGFloat
+    ) {
+        let points: JSArray = samples.map { sample in
+            let normalized = normalize(sample: sample, within: view.currentDrawingRect)
+            return [
+                "x": Double(normalized.x),
+                "y": Double(normalized.y),
+                "pressure": Double(normalized.pressure),
+                "altitude": Double(normalized.altitude),
+                "azimuth": Double(normalized.azimuth),
+                "timestamp": normalized.timestamp,
+            ] as JSObject
+        }
+        emitEvent(
+            "eraserStrokeSampled",
+            data: [
+                "strokeId": strokeId,
+                "baseWidth": Double(baseWidth),
+                "pressureSensitivity": Double(pressureSensitivity),
+                "points": points,
+            ] as JSObject
+        )
+    }
+
+    func metalCanvasView(_ view: MetalCanvasView, didEndEraserStroke strokeId: String) {
+        emitDebug("didEndEraserStroke \(strokeId)")
+        emitEvent(
+            "eraserStrokeEnded",
+            data: [
+                "strokeId": strokeId,
+            ] as JSObject
+        )
+    }
+
     func metalCanvasViewDidClear(_ view: MetalCanvasView) {
         emitDebug("strokesCleared")
         emitClearEvent("strokesCleared")
+    }
+
+    private func normalize(sample: CanvasStrokeSample, within bounds: CGRect) -> CanvasPoint {
+        let width = max(bounds.width, 1.0)
+        let height = max(bounds.height, 1.0)
+        return CanvasPoint(
+            x: (sample.location.x - bounds.minX) / width * 100.0,
+            y: (sample.location.y - bounds.minY) / height * 100.0,
+            pressure: max(0.0, min(1.0, sample.pressure)),
+            altitude: sample.altitude,
+            azimuth: sample.azimuth,
+            timestamp: sample.timestamp
+        )
     }
 }
 

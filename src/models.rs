@@ -43,7 +43,22 @@ pub struct CanvasConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub enum PenTool {
+    Draw,
+    Erase,
+}
+
+impl Default for PenTool {
+    fn default() -> Self {
+        Self::Draw
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PenConfig {
+    #[serde(default)]
+    pub tool: PenTool,
     #[serde(default = "default_color")]
     pub color: String,
     #[serde(default = "default_width")]
@@ -57,6 +72,7 @@ pub struct PenConfig {
 impl Default for PenConfig {
     fn default() -> Self {
         Self {
+            tool: PenTool::default(),
             color: default_color(),
             width: default_width(),
             opacity: default_opacity(),

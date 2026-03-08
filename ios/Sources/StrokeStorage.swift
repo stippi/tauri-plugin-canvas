@@ -33,12 +33,18 @@ struct CanvasStrokeFragment: Encodable {
 }
 
 struct CanvasPenConfig: Decodable {
+    enum Tool: String, Decodable {
+        case draw
+        case erase
+    }
+
+    let tool: Tool?
     let color: String?
     let width: CGFloat?
     let opacity: CGFloat?
     let pressureSensitivity: CGFloat?
 
-    static let `default` = CanvasPenConfig(color: "#000000", width: 2.0, opacity: 1.0, pressureSensitivity: 0.8)
+    static let `default` = CanvasPenConfig(tool: .draw, color: "#000000", width: 2.0, opacity: 1.0, pressureSensitivity: 0.8)
 }
 
 struct CanvasStrokeSample {
@@ -55,6 +61,13 @@ struct ActiveStroke {
     let color: String
     let baseWidth: CGFloat
     let opacity: CGFloat
+    let pressureSensitivity: CGFloat
+}
+
+struct ActiveEraserStroke {
+    let id: String
+    var points: [CanvasStrokeSample]
+    let baseWidth: CGFloat
     let pressureSensitivity: CGFloat
 }
 

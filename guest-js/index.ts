@@ -24,6 +24,7 @@ export interface CanvasConfig {
 }
 
 export interface PenConfig {
+  tool?: "draw" | "erase";
   color?: string;
   width?: number;
   opacity?: number;
@@ -55,6 +56,23 @@ export interface StrokeEndEvent {
   strokeId: string;
   points: StrokePoint[];
   boundingBox: Rect;
+}
+
+export interface EraserStrokeStartEvent {
+  strokeId: string;
+  baseWidth: number;
+  pressureSensitivity: number;
+}
+
+export interface EraserStrokeSampledEvent {
+  strokeId: string;
+  points: StrokePoint[];
+  baseWidth: number;
+  pressureSensitivity: number;
+}
+
+export interface EraserStrokeEndEvent {
+  strokeId: string;
 }
 
 export interface ExportOptions {
@@ -109,6 +127,7 @@ export async function isAvailable(): Promise<boolean> {
 export async function activatePen(config: PenConfig = {}): Promise<void> {
   await invoke("plugin:canvas|activate_pen", {
     config: {
+      tool: config.tool ?? "draw",
       color: config.color ?? "#000000",
       width: config.width ?? 2.0,
       opacity: config.opacity ?? 1.0,
@@ -199,6 +218,51 @@ export async function onDebug(
   }
 
   return listen<DebugEvent>("plugin:canvas:debug", (event) => {
+    handler(event.payload);
+  });
+}
+
+export async function onEraserStrokeStarted(
+  handler: (event: EraserStrokeStartEvent) => void,
+): Promise<UnlistenFn> {
+  if (isMobilePlatform()) {
+    const listener = await addPluginListener<EraserStrokeStartEvent>("canvas", "eraserStrokeStarted", handler);
+    return async () => {
+      await listener.unregister();
+    };
+  }
+
+  return listen<EraserStrokeStartEvent>("plugin:canvas:eraserStrokeStarted", (event) => {
+    handler(event.payload);
+  });
+}
+
+export async function onEraserStrokeSampled(
+  handler: (event: EraserStrokeSampledEvent) => void,
+): Promise<UnlistenFn> {
+  if (isMobilePlatform()) {
+    const listener = await addPluginListener<EraserStrokeSampledEvent>("canvas", "eraserStrokeSampled", handler);
+    return async () => {
+      await listener.unregister();
+    };
+  }
+
+  return listen<EraserStrokeSampledEvent>("plugin:canvas:eraserStrokeSampled", (event) => {
+    handler(event.payload);
+  });
+}
+
+export async function onEraserStrokeEnded(
+  handler: (event: EraserStrokeEndEvent) => void,
+): Promise<UnlistenFn> {
+  if (isMobilePlatform()) {
+    const listener = await addPluginListener<EraserStrokeEndEvent>("canvas", "eraserStrokeEnded", handler);
+    return async () => {
+      await listener.unregister();
+    };
+  }
+
+  return listen<EraserStrokeEndEvent>("plugin:canvas:eraserStrokeEnded", (event) => {
     handler(event.payload);
   });
 }
