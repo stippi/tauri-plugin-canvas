@@ -67,16 +67,25 @@ class CanvasPlugin: Plugin {
     @objc override func load(webview: WKWebView) {
         self.webview = webview
         self.parentView = webview.superview
+
+        // Prevent the scroll view from automatically adding safe area insets
+        // to its content. With viewport-fit=cover in the HTML meta tag, CSS
+        // env(safe-area-inset-*) already provides the correct values. The
+        // default .automatic behaviour would double-compensate, causing the
+        // bottom toolbar padding to be too large and inconsistent on rotation.
+        webview.scrollView.contentInsetAdjustmentBehavior = .never
+
         setupOverlayIfNeeded(over: webview)
         updateLayoutSnapshot(label: "load")
     }
 
     @objc public func isAvailable(_ invoke: Invoke) throws {
         let available = MTLCreateSystemDefaultDevice() != nil
-        invoke.resolve(AvailabilityResponse(
-            available: available,
-            reason: available ? nil : "Metal is not available on this device"
-        ))
+        invoke.resolve(
+            AvailabilityResponse(
+                available: available,
+                reason: available ? nil : "Metal is not available on this device"
+            ))
     }
 
     @objc public func showCanvas(_ invoke: Invoke) throws {
@@ -167,10 +176,12 @@ class CanvasPlugin: Plugin {
     }
 
     private func emitDebug(_ message: String) {
-        emitEvent("debug", data: [
-            "source": "ios-canvas",
-            "message": message,
-        ] as JSObject)
+        emitEvent(
+            "debug",
+            data: [
+                "source": "ios-canvas",
+                "message": message,
+            ] as JSObject)
     }
 
     private func setupOverlayIfNeeded(over webview: WKWebView?) {
@@ -243,7 +254,8 @@ class CanvasPlugin: Plugin {
 
     private func updateLayoutSnapshot(label: String) {
         guard let webview = webview, let parentView = parentView, let overlay = overlayView else {
-            lastLayoutSnapshot = "[\(label)] missing views webview=\(webview != nil) parent=\(parentView != nil) overlay=\(overlayView != nil)"
+            lastLayoutSnapshot =
+                "[\(label)] missing views webview=\(webview != nil) parent=\(parentView != nil) overlay=\(overlayView != nil)"
             return
         }
 
@@ -300,9 +312,11 @@ class CanvasPlugin: Plugin {
 extension CanvasPlugin: MetalCanvasViewDelegate {
     func metalCanvasView(_ view: MetalCanvasView, didStartStroke strokeId: String) {
         emitDebug("didStartStroke \(strokeId)")
-        emitEvent("strokeStarted", data: [
-            "strokeId": strokeId,
-        ] as JSObject)
+        emitEvent(
+            "strokeStarted",
+            data: [
+                "strokeId": strokeId
+            ] as JSObject)
     }
 
     func metalCanvasView(_ view: MetalCanvasView, didEndStroke stroke: CanvasStroke) {
@@ -379,7 +393,7 @@ extension CanvasPlugin: MetalCanvasViewDelegate {
         emitEvent(
             "eraserStrokeEnded",
             data: [
-                "strokeId": strokeId,
+                "strokeId": strokeId
             ] as JSObject
         )
     }
