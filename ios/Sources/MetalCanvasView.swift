@@ -5,7 +5,9 @@ protocol MetalCanvasViewDelegate: AnyObject {
     func metalCanvasView(_ view: MetalCanvasView, didStartStroke strokeId: String)
     func metalCanvasView(_ view: MetalCanvasView, didEndStroke stroke: CanvasStroke)
     func metalCanvasView(_ view: MetalCanvasView, didStartEraserStroke stroke: ActiveEraserStroke)
-    func metalCanvasView(_ view: MetalCanvasView, didSampleEraserStroke strokeId: String, samples: [CanvasStrokeSample], baseWidth: CGFloat, pressureSensitivity: CGFloat)
+    func metalCanvasView(
+        _ view: MetalCanvasView, didSampleEraserStroke strokeId: String,
+        samples: [CanvasStrokeSample], baseWidth: CGFloat, pressureSensitivity: CGFloat)
     func metalCanvasView(_ view: MetalCanvasView, didEndEraserStroke strokeId: String)
     func metalCanvasViewDidClear(_ view: MetalCanvasView)
 }
@@ -18,7 +20,8 @@ final class MetalCanvasView: MTKView {
     private var penConfig = CanvasPenConfig.default
     private var drawingRect: CGRect = .zero
     private var showsCommittedStrokes = false
-    private lazy var strokeRecognizer = StrokeGestureRecognizer(target: self, action: #selector(handleStroke(_:)))
+    private lazy var strokeRecognizer = StrokeGestureRecognizer(
+        target: self, action: #selector(handleStroke(_:)))
     private var strokeRenderer: StrokeRenderer?
     private var handoffStroke: ActiveStroke?
     private var activeEraserStroke: ActiveEraserStroke?
@@ -110,7 +113,41 @@ final class MetalCanvasView: MTKView {
     }
 
     func exportLatestStrokeFragment() -> CanvasStrokeFragment? {
-        strokeStorage.lastStrokeFragment(in: drawingRect)
+        guard let renderer = strokeRenderer,
+            let stroke = strokeStorage.committedStrokes.last
+        else {
+            return nil
+        }
+
+        let bounds = drawingRect
+        let box = strokeStorage.boundingBox(for: stroke)
+        let padding = max(8.0, stroke.baseWidth * 3.0)
+        let clippedBox = box.insetBy(dx: -padding, dy: -padding).intersection(bounds)
+        guard clippedBox.width > 0, clippedBox.height > 0 else { return nil }
+
+        guard
+            let image = renderer.renderStrokeToImage(
+                stroke, in: bounds, fragmentBounds: clippedBox),
+            let data = image.pngData()?.base64EncodedString()
+        else {
+            return nil
+        }
+
+        let normalize = { (value: CGFloat, total: CGFloat) -> CGFloat in
+            guard total > 0 else { return 0 }
+            return value / total * 100.0
+        }
+
+        return CanvasStrokeFragment(
+            strokeId: stroke.id,
+            boundingBox: CanvasRect(
+                x: normalize(clippedBox.origin.x - bounds.minX, bounds.width),
+                y: normalize(clippedBox.origin.y - bounds.minY, bounds.height),
+                width: normalize(clippedBox.width, bounds.width),
+                height: normalize(clippedBox.height, bounds.height)
+            ),
+            imageData: data
+        )
     }
 
     @objc private func handleStroke(_ recognizer: StrokeGestureRecognizer) {
@@ -127,7 +164,8 @@ final class MetalCanvasView: MTKView {
                     id: UUID().uuidString,
                     points: [sample],
                     baseWidth: penConfig.width ?? CanvasPenConfig.default.width ?? 12.0,
-                    pressureSensitivity: penConfig.pressureSensitivity ?? CanvasPenConfig.default.pressureSensitivity ?? 0.25
+                    pressureSensitivity: penConfig.pressureSensitivity ?? CanvasPenConfig.default
+                        .pressureSensitivity ?? 0.25
                 )
                 activeEraserStroke = stroke
                 rebuildRenderer(mode: .dirty)
@@ -189,13 +227,16 @@ final class MetalCanvasView: MTKView {
                     handoffOpacity = 1.0
                     rebuildRenderer(mode: .drawing)
                     startHandoffFade()
-                    strokeDelegate?.metalCanvasView(self, didEndStroke: strokeStorage.exportStrokes(in: drawingRect).last ?? CanvasStroke(
-                        id: stroke.id,
-                        points: [],
-                        color: stroke.color,
-                        baseWidth: stroke.baseWidth,
-                        boundingBox: CanvasRect(x: 0, y: 0, width: 0, height: 0)
-                    ))
+                    strokeDelegate?.metalCanvasView(
+                        self,
+                        didEndStroke: strokeStorage.exportStrokes(in: drawingRect).last
+                            ?? CanvasStroke(
+                                id: stroke.id,
+                                points: [],
+                                color: stroke.color,
+                                baseWidth: stroke.baseWidth,
+                                boundingBox: CanvasRect(x: 0, y: 0, width: 0, height: 0)
+                            ))
                 }
             }
 
@@ -221,7 +262,8 @@ final class MetalCanvasView: MTKView {
         }
         return CanvasStrokeSample(
             location: touch.location(in: self),
-            pressure: touch.maximumPossibleForce > 0 ? touch.force / touch.maximumPossibleForce : 0.5,
+            pressure: touch.maximumPossibleForce > 0
+                ? touch.force / touch.maximumPossibleForce : 0.5,
             altitude: touch.altitudeAngle,
             azimuth: touch.azimuthAngle(in: self),
             roll: roll,
@@ -253,7 +295,8 @@ final class MetalCanvasView: MTKView {
         handoffFadeStartTime = CACurrentMediaTime()
         let displayLink = CADisplayLink(target: self, selector: #selector(handleHandoffFrame))
         if #available(iOS 15.0, *) {
-            displayLink.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 120)
+            displayLink.preferredFrameRateRange = CAFrameRateRange(
+                minimum: 30, maximum: 120, preferred: 120)
         } else {
             displayLink.preferredFramesPerSecond = 60
         }

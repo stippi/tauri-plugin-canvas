@@ -100,7 +100,8 @@ final class StrokeStorage {
             color: pen.color ?? CanvasPenConfig.default.color ?? "#000000",
             baseWidth: pen.width ?? CanvasPenConfig.default.width ?? 2.0,
             opacity: pen.opacity ?? CanvasPenConfig.default.opacity ?? 1.0,
-            pressureSensitivity: pen.pressureSensitivity ?? CanvasPenConfig.default.pressureSensitivity ?? 0.8
+            pressureSensitivity: pen.pressureSensitivity ?? CanvasPenConfig.default
+                .pressureSensitivity ?? 0.8
         )
         activeStroke = stroke
         redoStack.removeAll()
@@ -172,52 +173,6 @@ final class StrokeStorage {
         }
     }
 
-    func lastStrokeFragment(in bounds: CGRect) -> CanvasStrokeFragment? {
-        guard let stroke = committedStrokes.last else { return nil }
-        if stroke.style == .marker {
-            return lastMarkerStrokeFragment(stroke, in: bounds)
-        }
-        let box = boundingBox(for: stroke)
-        let padding = max(8.0, stroke.baseWidth * 3.0)
-        let clippedBox = box.insetBy(dx: -padding, dy: -padding).intersection(bounds)
-        guard clippedBox.width > 0, clippedBox.height > 0 else { return nil }
-        guard let data = renderStrokeFragment(stroke, in: clippedBox)?.pngData()?.base64EncodedString() else {
-            return nil
-        }
-
-        return CanvasStrokeFragment(
-            strokeId: stroke.id,
-            boundingBox: CanvasRect(
-                x: normalize(clippedBox.origin.x - bounds.minX, within: bounds.width),
-                y: normalize(clippedBox.origin.y - bounds.minY, within: bounds.height),
-                width: normalize(clippedBox.width, within: bounds.width),
-                height: normalize(clippedBox.height, within: bounds.height)
-            ),
-            imageData: data
-        )
-    }
-
-    private func lastMarkerStrokeFragment(_ stroke: ActiveStroke, in bounds: CGRect) -> CanvasStrokeFragment? {
-        guard let fragment = renderMarkerStrokeFragment(stroke, in: bounds) else {
-            return nil
-        }
-
-        guard let data = fragment.image.pngData()?.base64EncodedString() else {
-            return nil
-        }
-
-        return CanvasStrokeFragment(
-            strokeId: stroke.id,
-            boundingBox: CanvasRect(
-                x: normalize(fragment.bounds.origin.x - bounds.minX, within: bounds.width),
-                y: normalize(fragment.bounds.origin.y - bounds.minY, within: bounds.height),
-                width: normalize(fragment.bounds.width, within: bounds.width),
-                height: normalize(fragment.bounds.height, within: bounds.height)
-            ),
-            imageData: data
-        )
-    }
-
     private func exportStroke(_ stroke: ActiveStroke, in bounds: CGRect) -> CanvasStroke {
         let points = stroke.points.map { sample in
             CanvasPoint(
@@ -242,14 +197,6 @@ final class StrokeStorage {
                 height: normalize(box.height, within: bounds.height)
             )
         )
-    }
-
-    private func renderStrokeFragment(_ stroke: ActiveStroke, in fragmentBounds: CGRect) -> UIImage? {
-        let renderBounds = CGRect(origin: .zero, size: fragmentBounds.size)
-        let renderer = UIGraphicsImageRenderer(bounds: renderBounds)
-        return renderer.image { context in
-            renderStroke(stroke, in: context.cgContext, offset: fragmentBounds.origin)
-        }
     }
 
     private func normalize(_ value: CGFloat, within total: CGFloat) -> CGFloat {
@@ -287,7 +234,8 @@ extension StrokeStorage {
             return
         }
 
-        guard let color = UIColor(hex: stroke.color)?.withAlphaComponent(stroke.opacity).cgColor else {
+        guard let color = UIColor(hex: stroke.color)?.withAlphaComponent(stroke.opacity).cgColor
+        else {
             return
         }
 
@@ -295,12 +243,13 @@ extension StrokeStorage {
             context.setFillColor(color)
             let translated = CGPoint(x: point.location.x - offset.x, y: point.location.y - offset.y)
             let radius = max(1.0, stroke.baseWidth * 0.5)
-            context.fillEllipse(in: CGRect(
-                x: translated.x - radius,
-                y: translated.y - radius,
-                width: radius * 2,
-                height: radius * 2
-            ))
+            context.fillEllipse(
+                in: CGRect(
+                    x: translated.x - radius,
+                    y: translated.y - radius,
+                    width: radius * 2,
+                    height: radius * 2
+                ))
             return
         }
 
@@ -316,10 +265,12 @@ extension StrokeStorage {
         }
     }
 
-    private func renderPencilStroke(_ stroke: ActiveStroke, in context: CGContext, offset: CGPoint) {
+    private func renderPencilStroke(_ stroke: ActiveStroke, in context: CGContext, offset: CGPoint)
+    {
         let scale = context.ctm.a == 0 ? UIScreen.main.scale : abs(context.ctm.a)
         let shapeBounds = boundingBox(for: stroke).offsetBy(dx: -offset.x, dy: -offset.y)
-        let paddedBounds = shapeBounds.insetBy(dx: -max(3.0, stroke.baseWidth), dy: -max(3.0, stroke.baseWidth))
+        let paddedBounds = shapeBounds.insetBy(
+            dx: -max(3.0, stroke.baseWidth), dy: -max(3.0, stroke.baseWidth))
         guard paddedBounds.width > 0, paddedBounds.height > 0 else {
             return
         }
@@ -372,8 +323,10 @@ extension StrokeStorage {
                 let coverage = PencilTexture.coverage(at: worldPoint, baseAlpha: maskAlpha)
                 let finalAlpha = min(1.0, maskAlpha * coverage)
                 let premultipliedRed = UInt8(max(0, min(255, Int(round(red * finalAlpha * 255.0)))))
-                let premultipliedGreen = UInt8(max(0, min(255, Int(round(green * finalAlpha * 255.0)))))
-                let premultipliedBlue = UInt8(max(0, min(255, Int(round(blue * finalAlpha * 255.0)))))
+                let premultipliedGreen = UInt8(
+                    max(0, min(255, Int(round(green * finalAlpha * 255.0)))))
+                let premultipliedBlue = UInt8(
+                    max(0, min(255, Int(round(blue * finalAlpha * 255.0)))))
                 let alphaByte = UInt8(max(0, min(255, Int(round(finalAlpha * 255.0)))))
                 let pixelIndex = (y * pixelWidth + x) * 4
                 colorPixels[pixelIndex] = premultipliedRed
@@ -391,7 +344,8 @@ extension StrokeStorage {
                 bitsPerComponent: 8,
                 bytesPerRow: bytesPerRow,
                 space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                    | CGBitmapInfo.byteOrder32Big.rawValue
             ),
             let image = outputContext.makeImage()
         else {
@@ -404,14 +358,17 @@ extension StrokeStorage {
         context.restoreGState()
     }
 
-    private func renderMarkerStroke(_ stroke: ActiveStroke, in context: CGContext, offset: CGPoint) {
+    private func renderMarkerStroke(_ stroke: ActiveStroke, in context: CGContext, offset: CGPoint)
+    {
         let scale = context.ctm.a == 0 ? UIScreen.main.scale : abs(context.ctm.a)
-        guard let raster = markerRaster(
-            for: stroke,
-            fragmentOrigin: offset,
-            scale: scale,
-            extraPadding: max(4.0, stroke.baseWidth)
-        ) else {
+        guard
+            let raster = markerRaster(
+                for: stroke,
+                fragmentOrigin: offset,
+                scale: scale,
+                extraPadding: max(4.0, stroke.baseWidth)
+            )
+        else {
             return
         }
         guard let image = raster.image.cgImage else {
@@ -424,29 +381,14 @@ extension StrokeStorage {
         context.restoreGState()
     }
 
-    private func renderMarkerStrokeFragment(_ stroke: ActiveStroke, in bounds: CGRect) -> (bounds: CGRect, image: UIImage)? {
-        let padding = max(8.0, stroke.baseWidth * 3.0)
-        let clipBounds = MarkerBrush.bounds(for: stroke).insetBy(dx: -padding, dy: -padding).intersection(bounds)
-        guard clipBounds.width > 0, clipBounds.height > 0 else {
-            return nil
-        }
-        return markerRaster(
-            for: stroke,
-            fragmentOrigin: clipBounds.origin,
-            scale: UIScreen.main.scale,
-            extraPadding: 0
-        ).map {
-            (bounds: $0.bounds, image: $0.image)
-        }
-    }
-
     private func markerRaster(
         for stroke: ActiveStroke,
         fragmentOrigin: CGPoint,
         scale: CGFloat,
         extraPadding: CGFloat
     ) -> (bounds: CGRect, image: UIImage)? {
-        let shapeBounds = MarkerBrush.bounds(for: stroke).offsetBy(dx: -fragmentOrigin.x, dy: -fragmentOrigin.y)
+        let shapeBounds = MarkerBrush.bounds(for: stroke).offsetBy(
+            dx: -fragmentOrigin.x, dy: -fragmentOrigin.y)
         let paddedBounds = shapeBounds.insetBy(dx: -extraPadding, dy: -extraPadding)
         guard paddedBounds.width > 0, paddedBounds.height > 0 else {
             return nil
@@ -465,10 +407,16 @@ extension StrokeStorage {
                 width: dab.halfWidth * 2 + stroke.baseWidth * 2,
                 height: dab.halfHeight * 2 + stroke.baseWidth * 2
             )
-            let localMinX = max(0, Int(floor((dabBounds.minX - fragmentOrigin.x - paddedBounds.minX) * scale)))
-            let localMaxX = min(pixelWidth - 1, Int(ceil((dabBounds.maxX - fragmentOrigin.x - paddedBounds.minX) * scale)))
-            let localMinY = max(0, Int(floor((dabBounds.minY - fragmentOrigin.y - paddedBounds.minY) * scale)))
-            let localMaxY = min(pixelHeight - 1, Int(ceil((dabBounds.maxY - fragmentOrigin.y - paddedBounds.minY) * scale)))
+            let localMinX = max(
+                0, Int(floor((dabBounds.minX - fragmentOrigin.x - paddedBounds.minX) * scale)))
+            let localMaxX = min(
+                pixelWidth - 1,
+                Int(ceil((dabBounds.maxX - fragmentOrigin.x - paddedBounds.minX) * scale)))
+            let localMinY = max(
+                0, Int(floor((dabBounds.minY - fragmentOrigin.y - paddedBounds.minY) * scale)))
+            let localMaxY = min(
+                pixelHeight - 1,
+                Int(ceil((dabBounds.maxY - fragmentOrigin.y - paddedBounds.minY) * scale)))
             guard localMinX <= localMaxX, localMinY <= localMaxY else { continue }
 
             for y in localMinY...localMaxY {
@@ -505,8 +453,10 @@ extension StrokeStorage {
 
                 let finalAlpha = min(1.0, maskAlpha)
                 let premultipliedRed = UInt8(max(0, min(255, Int(round(red * finalAlpha * 255.0)))))
-                let premultipliedGreen = UInt8(max(0, min(255, Int(round(green * finalAlpha * 255.0)))))
-                let premultipliedBlue = UInt8(max(0, min(255, Int(round(blue * finalAlpha * 255.0)))))
+                let premultipliedGreen = UInt8(
+                    max(0, min(255, Int(round(green * finalAlpha * 255.0)))))
+                let premultipliedBlue = UInt8(
+                    max(0, min(255, Int(round(blue * finalAlpha * 255.0)))))
                 let alphaByte = UInt8(max(0, min(255, Int(round(finalAlpha * 255.0)))))
                 let pixelIndex = (y * pixelWidth + x) * 4
                 colorPixels[pixelIndex] = premultipliedRed
@@ -524,7 +474,8 @@ extension StrokeStorage {
                 bitsPerComponent: 8,
                 bytesPerRow: bytesPerRow,
                 space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                    | CGBitmapInfo.byteOrder32Big.rawValue
             ),
             let image = outputContext.makeImage()
         else {
@@ -542,18 +493,21 @@ extension StrokeStorage {
         )
     }
 
-    private func drawPencilPressureMask(_ stroke: ActiveStroke, in context: CGContext, offset: CGPoint) {
+    private func drawPencilPressureMask(
+        _ stroke: ActiveStroke, in context: CGContext, offset: CGPoint
+    ) {
         if stroke.points.count == 1, let point = stroke.points.first {
             let translated = CGPoint(x: point.location.x - offset.x, y: point.location.y - offset.y)
             let radius = max(1.0, stroke.baseWidth * 0.5)
             let alpha = stroke.opacity * StrokeMeshBuilder.pressureOpacity(for: point.pressure)
             context.setFillColor(UIColor(white: 1.0, alpha: alpha).cgColor)
-            context.fillEllipse(in: CGRect(
-                x: translated.x - radius,
-                y: translated.y - radius,
-                width: radius * 2,
-                height: radius * 2
-            ))
+            context.fillEllipse(
+                in: CGRect(
+                    x: translated.x - radius,
+                    y: translated.y - radius,
+                    width: radius * 2,
+                    height: radius * 2
+                ))
             return
         }
 
@@ -577,33 +531,53 @@ extension StrokeStorage {
                 1.0,
                 stroke.baseWidth * (1.0 + (current.pressure - 0.5) * stroke.pressureSensitivity)
             )
-            let previousOffset = CGPoint(x: normal.x * previousWidth * 0.5, y: normal.y * previousWidth * 0.5)
-            let currentOffset = CGPoint(x: normal.x * currentWidth * 0.5, y: normal.y * currentWidth * 0.5)
-            let alpha = stroke.opacity * StrokeMeshBuilder.pressureOpacity(for: (previous.pressure + current.pressure) * 0.5)
+            let previousOffset = CGPoint(
+                x: normal.x * previousWidth * 0.5, y: normal.y * previousWidth * 0.5)
+            let currentOffset = CGPoint(
+                x: normal.x * currentWidth * 0.5, y: normal.y * currentWidth * 0.5)
+            let alpha =
+                stroke.opacity
+                * StrokeMeshBuilder.pressureOpacity(
+                    for: (previous.pressure + current.pressure) * 0.5)
 
             context.setFillColor(UIColor(white: 1.0, alpha: alpha).cgColor)
             context.beginPath()
-            context.move(to: CGPoint(x: previous.location.x + previousOffset.x - offset.x, y: previous.location.y + previousOffset.y - offset.y))
-            context.addLine(to: CGPoint(x: current.location.x + currentOffset.x - offset.x, y: current.location.y + currentOffset.y - offset.y))
-            context.addLine(to: CGPoint(x: current.location.x - currentOffset.x - offset.x, y: current.location.y - currentOffset.y - offset.y))
-            context.addLine(to: CGPoint(x: previous.location.x - previousOffset.x - offset.x, y: previous.location.y - previousOffset.y - offset.y))
+            context.move(
+                to: CGPoint(
+                    x: previous.location.x + previousOffset.x - offset.x,
+                    y: previous.location.y + previousOffset.y - offset.y))
+            context.addLine(
+                to: CGPoint(
+                    x: current.location.x + currentOffset.x - offset.x,
+                    y: current.location.y + currentOffset.y - offset.y))
+            context.addLine(
+                to: CGPoint(
+                    x: current.location.x - currentOffset.x - offset.x,
+                    y: current.location.y - currentOffset.y - offset.y))
+            context.addLine(
+                to: CGPoint(
+                    x: previous.location.x - previousOffset.x - offset.x,
+                    y: previous.location.y - previousOffset.y - offset.y))
             context.closePath()
             context.fillPath()
         }
     }
 
-    private func drawStrokeShape(_ stroke: ActiveStroke, in context: CGContext, offset: CGPoint, fillColor: CGColor) {
+    private func drawStrokeShape(
+        _ stroke: ActiveStroke, in context: CGContext, offset: CGPoint, fillColor: CGColor
+    ) {
         context.setFillColor(fillColor)
 
         if stroke.points.count == 1, let point = stroke.points.first {
             let translated = CGPoint(x: point.location.x - offset.x, y: point.location.y - offset.y)
             let radius = max(1.0, stroke.baseWidth * 0.5)
-            context.fillEllipse(in: CGRect(
-                x: translated.x - radius,
-                y: translated.y - radius,
-                width: radius * 2,
-                height: radius * 2
-            ))
+            context.fillEllipse(
+                in: CGRect(
+                    x: translated.x - radius,
+                    y: translated.y - radius,
+                    width: radius * 2,
+                    height: radius * 2
+                ))
             return
         }
 
