@@ -20,7 +20,7 @@ final class MetalCanvasView: MTKView {
     private var penConfig = CanvasPenConfig.default
     private var drawingRect: CGRect = .zero
     private var showsCommittedStrokes = false
-    private lazy var strokeRecognizer = StrokeGestureRecognizer(
+    lazy var strokeRecognizer = StrokeGestureRecognizer(
         target: self, action: #selector(handleStroke(_:)))
     private var strokeRenderer: StrokeRenderer?
     private var handoffStroke: ActiveStroke?
@@ -47,8 +47,12 @@ final class MetalCanvasView: MTKView {
         isUserInteractionEnabled = false
         isMultipleTouchEnabled = true
         strokeRecognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
-
-        addGestureRecognizer(strokeRecognizer)
+        strokeRecognizer.canvasView = self
+        strokeRecognizer.isEnabled = false
+        // NOTE: The recognizer is NOT added to this view. It is installed on the
+        // parent view by CanvasPlugin so that pencil touches are captured
+        // regardless of hit-testing, while finger touches pass through to the
+        // WKWebView underneath (enabling two-finger zoom/pan).
         strokeRenderer = StrokeRenderer(metalView: self)
         delegate = strokeRenderer
         drawingRect = bounds
@@ -60,11 +64,10 @@ final class MetalCanvasView: MTKView {
     }
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        guard isUserInteractionEnabled && !isHidden && alpha > 0.01 else {
-            return false
-        }
-
-        return drawingRect.contains(point)
+        // Always return false so this view is never the hit-test target.
+        // The StrokeGestureRecognizer lives on the *parent* view and captures
+        // pencil touches there. Finger touches naturally reach the WKWebView.
+        return false
     }
 
     override func layoutSubviews() {

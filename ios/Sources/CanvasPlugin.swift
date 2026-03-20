@@ -103,6 +103,7 @@ class CanvasPlugin: Plugin {
         DispatchQueue.main.async {
             self.overlayView?.isHidden = true
             self.overlayView?.isUserInteractionEnabled = false
+            self.overlayView?.strokeRecognizer.isEnabled = false
         }
         invoke.resolve()
     }
@@ -114,6 +115,7 @@ class CanvasPlugin: Plugin {
             self.overlayView?.updatePen(args)
             self.overlayView?.isHidden = false
             self.overlayView?.isUserInteractionEnabled = true
+            self.overlayView?.strokeRecognizer.isEnabled = true
             self.updateLayoutSnapshot(label: "activatePen")
             self.emitDebug(self.lastLayoutSnapshot)
         }
@@ -123,6 +125,7 @@ class CanvasPlugin: Plugin {
     @objc public func deactivatePen(_ invoke: Invoke) throws {
         DispatchQueue.main.async {
             self.overlayView?.isUserInteractionEnabled = false
+            self.overlayView?.strokeRecognizer.isEnabled = false
         }
         invoke.resolve()
     }
@@ -196,6 +199,15 @@ class CanvasPlugin: Plugin {
         parentView.addSubview(overlay)
         overlay.frame = parentView.bounds
         parentView.bringSubviewToFront(overlay)
+
+        // Install the pencil gesture recognizer on the *parent* view (not the
+        // overlay). Because the overlay's point(inside:with:) always returns
+        // false, attaching the recognizer there would starve it of events.
+        // On the parent view the recognizer receives all touches; it only
+        // tracks .pencil touches so finger events pass through to WKWebView
+        // undisturbed, preserving two-finger zoom/pan.
+        parentView.addGestureRecognizer(overlay.strokeRecognizer)
+
         self.overlayView = overlay
         self.parentView = parentView
         updateLayoutSnapshot(label: "setupOverlay")
