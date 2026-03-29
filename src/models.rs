@@ -41,31 +41,21 @@ pub struct CanvasConfig {
     pub placement: CanvasPlacement,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PenTool {
+    #[default]
     Draw,
     Erase,
 }
 
-impl Default for PenTool {
-    fn default() -> Self {
-        Self::Draw
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PenStyle {
+    #[default]
     Smooth,
     Marker,
     Pencil,
-}
-
-impl Default for PenStyle {
-    fn default() -> Self {
-        Self::Smooth
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
