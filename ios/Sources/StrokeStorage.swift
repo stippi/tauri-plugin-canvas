@@ -523,13 +523,15 @@ extension StrokeStorage {
             )
             let length = max(0.001, sqrt(delta.x * delta.x + delta.y * delta.y))
             let normal = CGPoint(x: -delta.y / length, y: delta.x / length)
+            let previousRemapped = StrokeMeshBuilder.remapPressure(previous.pressure)
+            let currentRemapped = StrokeMeshBuilder.remapPressure(current.pressure)
             let previousWidth = max(
                 1.0,
-                stroke.baseWidth * (1.0 + (previous.pressure - 0.5) * stroke.pressureSensitivity)
+                stroke.baseWidth * (1.0 + (previousRemapped - 0.5) * stroke.pressureSensitivity)
             )
             let currentWidth = max(
                 1.0,
-                stroke.baseWidth * (1.0 + (current.pressure - 0.5) * stroke.pressureSensitivity)
+                stroke.baseWidth * (1.0 + (currentRemapped - 0.5) * stroke.pressureSensitivity)
             )
             let previousOffset = CGPoint(
                 x: normal.x * previousWidth * 0.5, y: normal.y * previousWidth * 0.5)

@@ -50,9 +50,21 @@ enum PencilTexture {
             Int(floor(scaledPoint.x * 4.8)) + 211,
             Int(floor(scaledPoint.y * 4.8)) + 163
         ))
-        let dense = 0.32 + 0.68 * smoothstep(0.18, 0.78, clumpNoise)
-        let speckle = 0.62 + 0.38 * microNoise
-        let gaps = smoothstep(0.58, 0.93, tooth + 0.45 * microNoise + 0.18 * gapNoise - 0.34)
+        // Noise factors compress toward 1.0 with increasing pressure so that
+        // heavy strokes appear denser while light strokes keep full paper grain.
+        let fill = pressure * pressure
+        let dense = {
+            let raw = 0.32 + 0.68 * smoothstep(0.18, 0.78, clumpNoise)
+            return raw + (1.0 - raw) * fill * 0.7
+        }()
+        let speckle = {
+            let raw = 0.62 + 0.38 * microNoise
+            return raw + (1.0 - raw) * fill * 0.5
+        }()
+        let gaps = {
+            let raw = smoothstep(0.58, 0.93, tooth + 0.45 * microNoise + 0.18 * gapNoise - 0.34)
+            return raw + (1.0 - raw) * fill * 0.6
+        }()
         let coverage = tooth * dense * speckle * gaps
         return clamp01(coverage)
     }

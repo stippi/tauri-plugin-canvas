@@ -71,9 +71,15 @@ private let shaderSource = """
       float clumpNoise = hash22(clumpCoord);
       float microNoise = hash22(microCoord);
       float gapNoise = hash22(gapCoord);
-      float dense = 0.32 + 0.68 * smoothstep_safe(0.18, 0.78, clumpNoise);
-      float speckle = 0.62 + 0.38 * microNoise;
-      float gaps = smoothstep_safe(0.58, 0.93, tooth + 0.45 * microNoise + 0.18 * gapNoise - 0.34);
+      // Compress noise toward 1.0 with increasing pressure so heavy
+      // strokes look denser while light strokes keep full paper grain.
+      float fill = pressure * pressure;
+      float denseRaw = 0.32 + 0.68 * smoothstep_safe(0.18, 0.78, clumpNoise);
+      float dense = denseRaw + (1.0 - denseRaw) * fill * 0.7;
+      float speckleRaw = 0.62 + 0.38 * microNoise;
+      float speckle = speckleRaw + (1.0 - speckleRaw) * fill * 0.5;
+      float gapsRaw = smoothstep_safe(0.58, 0.93, tooth + 0.45 * microNoise + 0.18 * gapNoise - 0.34);
+      float gaps = gapsRaw + (1.0 - gapsRaw) * fill * 0.6;
       return clamp(tooth * dense * speckle * gaps, 0.0, 1.0);
     }
 

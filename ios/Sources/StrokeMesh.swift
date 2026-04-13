@@ -6,6 +6,20 @@ struct StrokeMeshVertex {
 }
 
 enum StrokeMeshBuilder {
+    /// Attempt 4: pow(p, 0.45) was good for mid-range but lifted very low
+    /// pressure too much, making delicate faint strokes impossible.
+    /// Now blending from linear (at p near 0) into the power curve
+    /// (above ~0.2) via smoothstep, so the lightest touch stays faint
+    /// while moderate pressure still ramps up quickly.
+    static func remapPressure(_ pressure: CGFloat) -> CGFloat {
+        let p = max(0.0, min(1.0, pressure))
+        let curved = pow(p, 0.45)
+        // smoothstep blend: linear below ~0.05, fully curved above ~0.2
+        let t = min(1.0, p / 0.2)
+        let blend = t * t * (3.0 - 2.0 * t)
+        return p + (curved - p) * blend
+    }
+
     static func triangles(for stroke: ActiveStroke) -> [[CGPoint]] {
         meshTriangles(for: stroke).map { triangle in
             triangle.map(\.point)
@@ -13,7 +27,8 @@ enum StrokeMeshBuilder {
     }
 
     static func pressureOpacity(for pressure: CGFloat) -> CGFloat {
-        max(0.2, min(1.0, 0.2 + pressure * 0.8))
+        let p = remapPressure(pressure)
+        return max(0.2, min(1.0, 0.2 + p * 0.8))
     }
 
     static func meshTriangles(for stroke: ActiveStroke) -> [[StrokeMeshVertex]] {
@@ -40,9 +55,10 @@ enum StrokeMeshBuilder {
         points.enumerated().map { index, point in
             let tangent = tangent(at: index, in: points)
             let normal = CGPoint(x: -tangent.y, y: tangent.x)
+            let remapped = remapPressure(point.pressure)
             let width = max(
                 1.0,
-                stroke.baseWidth * (1.0 + (point.pressure - 0.5) * stroke.pressureSensitivity)
+                stroke.baseWidth * (1.0 + (remapped - 0.5) * stroke.pressureSensitivity)
             )
             let offset = CGPoint(x: normal.x * width * 0.5, y: normal.y * width * 0.5)
             let left = StrokeMeshVertex(
