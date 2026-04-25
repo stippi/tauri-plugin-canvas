@@ -1,6 +1,8 @@
 use tauri::{command, AppHandle, Runtime};
 
-use crate::models::{AvailabilityResponse, CanvasConfig, ExportOptions, PenConfig, Stroke, StrokeFragment};
+use crate::models::{
+    AvailabilityResponse, CanvasConfig, ExportOptions, PenConfig, Stroke, StrokeFragment,
+};
 use crate::{CanvasExt, Result};
 
 #[command]
