@@ -30,6 +30,9 @@ export interface PenConfig {
   width?: number;
   opacity?: number;
   pressureSensitivity?: number;
+  /** Whether direct (finger / capacitive stylus) touches draw too.
+   *  Apple Pencil always draws. Default: false. */
+  fingerDrawing?: boolean;
 }
 
 export interface StrokePoint {
@@ -134,6 +137,7 @@ export async function activatePen(config: PenConfig = {}): Promise<void> {
       width: config.width ?? 2.0,
       opacity: config.opacity ?? 1.0,
       pressureSensitivity: config.pressureSensitivity ?? 0.8,
+      fingerDrawing: config.fingerDrawing ?? false,
     },
   });
 }

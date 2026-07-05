@@ -83,6 +83,13 @@ final class MetalCanvasView: MTKView {
 
     func updatePen(_ config: CanvasPenConfig) {
         penConfig = config
+        let fingerDrawing = config.fingerDrawing ?? false
+        strokeRecognizer.allowsFingerDrawing = fingerDrawing
+        var touchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+        if fingerDrawing {
+            touchTypes.append(NSNumber(value: UITouch.TouchType.direct.rawValue))
+        }
+        strokeRecognizer.allowedTouchTypes = touchTypes
     }
 
     func clearStrokes() {

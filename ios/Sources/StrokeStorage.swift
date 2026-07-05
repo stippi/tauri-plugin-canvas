@@ -50,6 +50,8 @@ struct CanvasPenConfig: Decodable {
     let width: CGFloat?
     let opacity: CGFloat?
     let pressureSensitivity: CGFloat?
+    /// Whether direct (finger / capacitive stylus) touches draw too.
+    let fingerDrawing: Bool?
 
     static let `default` = CanvasPenConfig(
         tool: .draw,
@@ -57,7 +59,8 @@ struct CanvasPenConfig: Decodable {
         color: "#000000",
         width: 2.0,
         opacity: 1.0,
-        pressureSensitivity: 0.8
+        pressureSensitivity: 0.8,
+        fingerDrawing: false
     )
 }
 

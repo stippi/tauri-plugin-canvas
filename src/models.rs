@@ -73,6 +73,9 @@ pub struct PenConfig {
     pub opacity: f32,
     #[serde(default = "default_pressure_sensitivity")]
     pub pressure_sensitivity: f32,
+    /// Whether direct (finger / capacitive stylus) touches draw too.
+    #[serde(default)]
+    pub finger_drawing: bool,
 }
 
 impl Default for PenConfig {
@@ -84,6 +87,7 @@ impl Default for PenConfig {
             width: default_width(),
             opacity: default_opacity(),
             pressure_sensitivity: default_pressure_sensitivity(),
+            finger_drawing: false,
         }
     }
 }
