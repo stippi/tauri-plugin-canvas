@@ -115,10 +115,22 @@ final class MetalCanvasView: MTKView {
         strokeStorage.renderImage(in: bounds, includeBackground: includeBackground)
     }
 
-    func exportLatestStrokeFragment() -> CanvasStrokeFragment? {
-        guard let renderer = strokeRenderer,
-            let stroke = strokeStorage.committedStrokes.last
-        else {
+    /// Export a committed stroke as a PNG fragment. `strokeId == nil` exports
+    /// the most recent committed stroke. Passing an explicit id makes the
+    /// per-stroke handoff to the webview race-free: when two strokes finish in
+    /// quick succession, each strokeEnded handler can still fetch its own
+    /// stroke instead of whichever happens to be the latest by then.
+    func exportStrokeFragment(strokeId: String?) -> CanvasStrokeFragment? {
+        guard let renderer = strokeRenderer else {
+            return nil
+        }
+        let candidate: ActiveStroke?
+        if let strokeId {
+            candidate = strokeStorage.committedStrokes.last(where: { $0.id == strokeId })
+        } else {
+            candidate = strokeStorage.committedStrokes.last
+        }
+        guard let stroke = candidate else {
             return nil
         }
 

@@ -162,8 +162,17 @@ export async function exportImage(options: ExportOptions = {}): Promise<string> 
   return invoke<string>("plugin:canvas|export_image", { options });
 }
 
-export async function exportLatestStrokeFragment(): Promise<StrokeFragment | null> {
-  return invoke<StrokeFragment | null>("plugin:canvas|export_latest_stroke_fragment");
+/**
+ * Export a committed stroke as a PNG fragment.
+ *
+ * Pass the `strokeId` from the corresponding `strokeEnded` event to export
+ * exactly that stroke — without it the newest committed stroke is exported,
+ * which races when two strokes finish in quick succession.
+ */
+export async function exportLatestStrokeFragment(strokeId?: string): Promise<StrokeFragment | null> {
+  return invoke<StrokeFragment | null>("plugin:canvas|export_latest_stroke_fragment", {
+    options: { strokeId },
+  });
 }
 
 export async function onStrokeStarted(

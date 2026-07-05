@@ -143,6 +143,14 @@ pub struct ExportOptions {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct ExportStrokeFragmentOptions {
+    /// Id of the committed stroke to export. `None` exports the most recent
+    /// committed stroke.
+    pub stroke_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct StrokeFragment {
     pub stroke_id: String,
     pub bounding_box: Rect,

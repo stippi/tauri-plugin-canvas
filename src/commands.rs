@@ -1,7 +1,8 @@
 use tauri::{command, AppHandle, Runtime};
 
 use crate::models::{
-    AvailabilityResponse, CanvasConfig, ExportOptions, PenConfig, Stroke, StrokeFragment,
+    AvailabilityResponse, CanvasConfig, ExportOptions, ExportStrokeFragmentOptions, PenConfig,
+    Stroke, StrokeFragment,
 };
 use crate::{CanvasExt, Result};
 
@@ -67,8 +68,10 @@ pub(crate) async fn export_image<R: Runtime>(
 #[command]
 pub(crate) async fn export_latest_stroke_fragment<R: Runtime>(
     app: AppHandle<R>,
+    options: Option<ExportStrokeFragmentOptions>,
 ) -> Result<Option<StrokeFragment>> {
-    app.canvas().export_latest_stroke_fragment()
+    app.canvas()
+        .export_latest_stroke_fragment(options.unwrap_or_default())
 }
 
 /// Register a listener for plugin events (desktop only).

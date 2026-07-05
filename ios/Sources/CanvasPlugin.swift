@@ -58,6 +58,10 @@ private struct ExportOptions: Decodable {
     let includeBackground: Bool?
 }
 
+private struct ExportStrokeFragmentArgs: Decodable {
+    let strokeId: String?
+}
+
 class CanvasPlugin: Plugin {
     private weak var webview: WKWebView?
     private weak var parentView: UIView?
@@ -163,7 +167,10 @@ class CanvasPlugin: Plugin {
     }
 
     @objc public func exportLatestStrokeFragment(_ invoke: Invoke) throws {
-        invoke.resolve(overlayView?.exportLatestStrokeFragment())
+        // Args are optional for backwards compatibility with callers that
+        // still request "whatever stroke is newest".
+        let args = try? invoke.parseArgs(ExportStrokeFragmentArgs.self)
+        invoke.resolve(overlayView?.exportStrokeFragment(strokeId: args?.strokeId))
     }
 
     private func emitEvent(_ eventName: String, data: JSObject) {
