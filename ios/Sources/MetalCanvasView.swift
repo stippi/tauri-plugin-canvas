@@ -8,7 +8,8 @@ protocol MetalCanvasViewDelegate: AnyObject {
     func metalCanvasView(
         _ view: MetalCanvasView, didSampleEraserStroke strokeId: String,
         samples: [CanvasStrokeSample], baseWidth: CGFloat, pressureSensitivity: CGFloat)
-    func metalCanvasView(_ view: MetalCanvasView, didEndEraserStroke strokeId: String)
+    func metalCanvasView(
+        _ view: MetalCanvasView, didEndEraserStroke strokeId: String, cancelled: Bool)
     func metalCanvasViewDidClear(_ view: MetalCanvasView)
 }
 
@@ -241,7 +242,7 @@ final class MetalCanvasView: MTKView {
                 }
                 activeEraserStroke = nil
                 rebuildRenderer(mode: .dirty)
-                strokeDelegate?.metalCanvasView(self, didEndEraserStroke: stroke.id)
+                strokeDelegate?.metalCanvasView(self, didEndEraserStroke: stroke.id, cancelled: false)
             } else {
                 samples.forEach { strokeStorage.append(sample: $0) }
                 if let stroke = strokeStorage.finishStroke() {
@@ -264,10 +265,16 @@ final class MetalCanvasView: MTKView {
 
         case .cancelled, .failed:
             clearHandoffStroke()
-            activeEraserStroke = nil
-            if penConfig.tool != .erase {
-                _ = strokeStorage.finishStroke()
+            if let eraser = activeEraserStroke {
+                activeEraserStroke = nil
+                // Tell the webview to drop its erase preview — without this a
+                // cancelled eraser stroke would leave a stale preview applied.
+                strokeDelegate?.metalCanvasView(self, didEndEraserStroke: eraser.id, cancelled: true)
             }
+            // Discard, don't commit: a cancelled stroke must neither reach the
+            // webview nor occupy a slot in the undo stack (a committed ghost
+            // stroke would desync native undo from the webview's op stack).
+            strokeStorage.cancelStroke()
             rebuildRenderer(mode: .dirty)
 
         default:

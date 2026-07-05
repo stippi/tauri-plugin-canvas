@@ -40,14 +40,25 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        if trackedTouch != nil {
+        if let tracked = trackedTouch {
             if pendingDirectTouch {
                 // Second finger before the first one moved → zoom/pan gesture.
                 // Fail so the web view keeps receiving both touches untouched.
                 state = .failed
+            } else if tracked.type == .direct,
+                touches.contains(where: {
+                    $0.type == .direct && $0.majorRadius < Self.palmRadiusThreshold
+                })
+            {
+                // A deliberate second finger while a finger stroke is already
+                // drawing signals a zoom/pan intent — discard the in-progress
+                // stroke (it never reaches the web view) instead of drawing
+                // on while the scene zooms underneath. Palm-sized contacts
+                // don't trigger this; they are just ignored below.
+                state = .cancelled
             }
-            // While a stroke is already drawing, extra touches (resting palm)
-            // are ignored rather than cancelling the stroke.
+            // Any other extra touches (resting palm during a pencil or finger
+            // stroke) are ignored rather than cancelling the stroke.
             for touch in touches {
                 ignore(touch, for: event)
             }

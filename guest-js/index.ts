@@ -77,6 +77,9 @@ export interface EraserStrokeSampledEvent {
 
 export interface EraserStrokeEndEvent {
   strokeId: string;
+  /** True when the stroke was discarded (e.g. a second finger turned the
+   *  gesture into zoom/pan) — drop the preview instead of committing it. */
+  cancelled?: boolean;
 }
 
 export interface ExportOptions {

@@ -125,6 +125,11 @@ final class StrokeStorage {
         return stroke
     }
 
+    /// Discard the in-progress stroke without committing it.
+    func cancelStroke() {
+        activeStroke = nil
+    }
+
     func clear() {
         committedStrokes.removeAll()
         redoStack.removeAll()

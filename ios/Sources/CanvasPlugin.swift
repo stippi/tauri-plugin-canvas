@@ -407,12 +407,13 @@ extension CanvasPlugin: MetalCanvasViewDelegate {
         )
     }
 
-    func metalCanvasView(_ view: MetalCanvasView, didEndEraserStroke strokeId: String) {
-        emitDebug("didEndEraserStroke \(strokeId)")
+    func metalCanvasView(_ view: MetalCanvasView, didEndEraserStroke strokeId: String, cancelled: Bool) {
+        emitDebug("didEndEraserStroke \(strokeId) cancelled=\(cancelled)")
         emitEvent(
             "eraserStrokeEnded",
             data: [
-                "strokeId": strokeId
+                "strokeId": strokeId,
+                "cancelled": cancelled,
             ] as JSObject
         )
     }
