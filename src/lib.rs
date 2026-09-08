@@ -46,6 +46,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::get_strokes,
             commands::export_image,
             commands::export_latest_stroke_fragment,
+            commands::begin_stroke_fade,
+            commands::end_stroke_fade,
             commands::register_listener,
             commands::remove_listener,
         ]);
@@ -65,6 +67,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::get_strokes,
             commands::export_image,
             commands::export_latest_stroke_fragment,
+            commands::begin_stroke_fade,
+            commands::end_stroke_fade,
         ]);
     }
 

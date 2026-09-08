@@ -2,7 +2,7 @@ use tauri::{command, AppHandle, Runtime};
 
 use crate::models::{
     AvailabilityResponse, CanvasConfig, ExportOptions, ExportStrokeFragmentOptions, PenConfig,
-    Stroke, StrokeFragment,
+    Stroke, StrokeFadeOptions, StrokeFragment,
 };
 use crate::{CanvasExt, Result};
 
@@ -72,6 +72,22 @@ pub(crate) async fn export_latest_stroke_fragment<R: Runtime>(
 ) -> Result<Option<StrokeFragment>> {
     app.canvas()
         .export_latest_stroke_fragment(options.unwrap_or_default())
+}
+
+#[command]
+pub(crate) async fn begin_stroke_fade<R: Runtime>(
+    app: AppHandle<R>,
+    options: StrokeFadeOptions,
+) -> Result<()> {
+    app.canvas().begin_stroke_fade(options)
+}
+
+#[command]
+pub(crate) async fn end_stroke_fade<R: Runtime>(
+    app: AppHandle<R>,
+    options: StrokeFadeOptions,
+) -> Result<()> {
+    app.canvas().end_stroke_fade(options)
 }
 
 /// Register a listener for plugin events (desktop only).

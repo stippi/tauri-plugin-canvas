@@ -62,6 +62,10 @@ private struct ExportStrokeFragmentArgs: Decodable {
     let strokeId: String?
 }
 
+private struct StrokeFadeArgs: Decodable {
+    let strokeId: String
+}
+
 class CanvasPlugin: Plugin {
     private weak var webview: WKWebView?
     private weak var parentView: UIView?
@@ -171,6 +175,22 @@ class CanvasPlugin: Plugin {
         // still request "whatever stroke is newest".
         let args = try? invoke.parseArgs(ExportStrokeFragmentArgs.self)
         invoke.resolve(overlayView?.exportStrokeFragment(strokeId: args?.strokeId))
+    }
+
+    @objc public func beginStrokeFade(_ invoke: Invoke) throws {
+        let args = try invoke.parseArgs(StrokeFadeArgs.self)
+        DispatchQueue.main.async {
+            self.overlayView?.beginHandoffFade(strokeId: args.strokeId)
+        }
+        invoke.resolve()
+    }
+
+    @objc public func endStrokeFade(_ invoke: Invoke) throws {
+        let args = try invoke.parseArgs(StrokeFadeArgs.self)
+        DispatchQueue.main.async {
+            self.overlayView?.endHandoffFade(strokeId: args.strokeId)
+        }
+        invoke.resolve()
     }
 
     private func emitEvent(_ eventName: String, data: JSObject) {

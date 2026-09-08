@@ -6,7 +6,7 @@ use tauri::{
 
 use crate::models::{
     AvailabilityResponse, CanvasConfig, ExportOptions, ExportStrokeFragmentOptions, PenConfig,
-    Stroke, StrokeFragment,
+    Stroke, StrokeFadeOptions, StrokeFragment,
 };
 
 #[cfg(target_os = "ios")]
@@ -90,6 +90,18 @@ impl<R: Runtime> Canvas<R> {
     ) -> crate::Result<Option<StrokeFragment>> {
         self.0
             .run_mobile_plugin("exportLatestStrokeFragment", options)
+            .map_err(Into::into)
+    }
+
+    pub fn begin_stroke_fade(&self, options: StrokeFadeOptions) -> crate::Result<()> {
+        self.0
+            .run_mobile_plugin("beginStrokeFade", options)
+            .map_err(Into::into)
+    }
+
+    pub fn end_stroke_fade(&self, options: StrokeFadeOptions) -> crate::Result<()> {
+        self.0
+            .run_mobile_plugin("endStrokeFade", options)
             .map_err(Into::into)
     }
 }

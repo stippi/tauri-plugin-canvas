@@ -24,12 +24,43 @@ final class MetalCanvasView: MTKView {
     lazy var strokeRecognizer = StrokeGestureRecognizer(
         target: self, action: #selector(handleStroke(_:)))
     private var strokeRenderer: StrokeRenderer?
-    private var handoffStroke: ActiveStroke?
     private var activeEraserStroke: ActiveEraserStroke?
-    private var handoffOpacity: CGFloat = 1.0
+
+    /// A committed stroke between "finished here" and "shown by the webview".
+    ///
+    /// The overlay keeps showing it from its pre-rendered texture. When the
+    /// webview has painted its copy it calls `beginStrokeFade`; from then on
+    /// both sides run a linear fade of `handoffFadeDuration` — the webview
+    /// in, this copy out with the complementary alpha (see
+    /// `handoff_fragment`) — so the composite never deviates from the
+    /// original stroke. Sync errors between the two display pipelines cost
+    /// a coverage error proportional to error/duration, which is why the
+    /// fade is long: a correct one is invisible anyway.
+    private struct HandoffStroke {
+        let id: String
+        let texture: MTLTexture
+        /// View points, snapped to the device pixel grid.
+        let bounds: CGRect
+        let createdAt: CFTimeInterval
+        var fadeStart: CFTimeInterval?
+
+        func progress(at now: CFTimeInterval, duration: CFTimeInterval) -> CGFloat {
+            guard let fadeStart else { return 0 }
+            return max(0, min(1, CGFloat((now - fadeStart) / duration)))
+        }
+    }
+
+    private var handoffs: [HandoffStroke] = []
     private var handoffDisplayLink: CADisplayLink?
-    private var handoffFadeStartTime: CFTimeInterval?
-    private let handoffFadeDuration: CFTimeInterval = 0.12
+    /// Same value as `STROKE_FADE_MS` in the JS API.
+    private let handoffFadeDuration: CFTimeInterval = 0.4
+    /// The webview's frame reaches the display roughly one frame after its
+    /// script ran. Starting late rather than early keeps opaque pixels (for
+    /// which the fade degenerates to a hard switch) from ever showing a gap.
+    private let handoffFadeLead: CFTimeInterval = 0.016
+    /// Fade anyway when the webview never asks (its paint failed): a stale
+    /// copy must not stay on screen forever.
+    private let handoffFadeTimeout: CFTimeInterval = 3.0
 
     init(frame: CGRect) {
         super.init(frame: frame, device: MTLCreateSystemDefaultDevice())
@@ -94,7 +125,7 @@ final class MetalCanvasView: MTKView {
     }
 
     func clearStrokes() {
-        clearHandoffStroke()
+        clearHandoffs()
         activeEraserStroke = nil
         strokeStorage.clear()
         rebuildRenderer(mode: .dirty)
@@ -102,14 +133,14 @@ final class MetalCanvasView: MTKView {
     }
 
     func undoStroke() {
-        clearHandoffStroke()
+        clearHandoffs()
         activeEraserStroke = nil
         guard strokeStorage.undo() else { return }
         rebuildRenderer(mode: .dirty)
     }
 
     func redoStroke() {
-        clearHandoffStroke()
+        clearHandoffs()
         activeEraserStroke = nil
         guard strokeStorage.redo() else { return }
         rebuildRenderer(mode: .dirty)
@@ -143,14 +174,16 @@ final class MetalCanvasView: MTKView {
         }
 
         let bounds = drawingRect
-        let box = strokeStorage.boundingBox(for: stroke)
-        let padding = max(8.0, stroke.baseWidth * 3.0)
-        let clippedBox = box.insetBy(dx: -padding, dy: -padding).intersection(bounds)
-        guard clippedBox.width > 0, clippedBox.height > 0 else { return nil }
+        guard let clippedBox = fragmentBounds(for: stroke) else { return nil }
 
+        // Prefer the hand-over texture: the webview then receives exactly
+        // the pixels the overlay is showing.
+        let texture =
+            handoffs.first(where: { $0.id == stroke.id })?.texture
+            ?? renderer.renderStrokeToTexture(stroke, in: bounds, fragmentBounds: clippedBox)
         guard
-            let image = renderer.renderStrokeToImage(
-                stroke, in: bounds, fragmentBounds: clippedBox),
+            let texture,
+            let image = renderer.image(from: texture),
             let data = image.pngData()?.base64EncodedString()
         else {
             return nil
@@ -179,7 +212,6 @@ final class MetalCanvasView: MTKView {
 
         switch recognizer.state {
         case .began:
-            clearHandoffStroke()
             let sample = makeSample(from: touch)
             guard drawingRect.contains(sample.location) else { return }
             if penConfig.tool == .erase {
@@ -246,10 +278,8 @@ final class MetalCanvasView: MTKView {
             } else {
                 samples.forEach { strokeStorage.append(sample: $0) }
                 if let stroke = strokeStorage.finishStroke() {
-                    handoffStroke = stroke
-                    handoffOpacity = 1.0
-                    rebuildRenderer(mode: .drawing)
-                    startHandoffFade()
+                    addHandoff(for: stroke)
+                    rebuildRenderer(mode: .dirty)
                     strokeDelegate?.metalCanvasView(
                         self,
                         didEndStroke: strokeStorage.exportStrokes(in: drawingRect).last
@@ -264,7 +294,6 @@ final class MetalCanvasView: MTKView {
             }
 
         case .cancelled, .failed:
-            clearHandoffStroke()
             if let eraser = activeEraserStroke {
                 activeEraserStroke = nil
                 // Tell the webview to drop its erase preview — without this a
@@ -301,27 +330,77 @@ final class MetalCanvasView: MTKView {
     }
 
     private func rebuildRenderer(mode: StrokeRenderer.RenderMode) {
-        let fadingStroke = handoffStroke.map { stroke in
-            ActiveStroke(
-                id: stroke.id,
-                points: stroke.points,
-                style: stroke.style,
-                color: stroke.color,
-                baseWidth: stroke.baseWidth,
-                opacity: stroke.opacity * handoffOpacity,
-                pressureSensitivity: stroke.pressureSensitivity
+        let now = CACurrentMediaTime()
+        let quads = handoffs.map { handoff in
+            HandoffQuad(
+                texture: handoff.texture,
+                bounds: handoff.bounds,
+                progress: Float(handoff.progress(at: now, duration: handoffFadeDuration))
             )
         }
         strokeRenderer?.update(
             committed: showsCommittedStrokes ? strokeStorage.committedStrokes : [],
-            active: strokeStorage.activeStroke ?? fadingStroke
+            active: strokeStorage.activeStroke,
+            handoffs: quads
         )
         strokeRenderer?.setRenderMode(mode)
     }
 
-    private func startHandoffFade() {
-        handoffDisplayLink?.invalidate()
-        handoffFadeStartTime = CACurrentMediaTime()
+    // MARK: - Hand-over to the webview
+
+    /// Fragment footprint of a committed stroke: padded bounds, clipped to
+    /// the drawing rect and snapped outward to whole device pixels. The
+    /// snap is what lets the hand-over texture be drawn texel-for-pixel,
+    /// pixel-identical to the live rendering it replaces.
+    private func fragmentBounds(for stroke: ActiveStroke) -> CGRect? {
+        let box = strokeStorage.boundingBox(for: stroke)
+        let padding = max(8.0, stroke.baseWidth * 3.0)
+        let clipped = box.insetBy(dx: -padding, dy: -padding).intersection(drawingRect)
+        guard clipped.width > 0, clipped.height > 0 else { return nil }
+        let scale = UIScreen.main.scale
+        let minX = floor(clipped.minX * scale) / scale
+        let minY = floor(clipped.minY * scale) / scale
+        let maxX = ceil(clipped.maxX * scale) / scale
+        let maxY = ceil(clipped.maxY * scale) / scale
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    private func addHandoff(for stroke: ActiveStroke) {
+        guard
+            let renderer = strokeRenderer,
+            let bounds = fragmentBounds(for: stroke),
+            let texture = renderer.renderStrokeToTexture(
+                stroke, in: drawingRect, fragmentBounds: bounds)
+        else {
+            return
+        }
+        handoffs.append(
+            HandoffStroke(
+                id: stroke.id, texture: texture, bounds: bounds,
+                createdAt: CACurrentMediaTime(), fadeStart: nil))
+        ensureHandoffDisplayLink()
+    }
+
+    /// The webview has painted its copy and starts fading it in now.
+    func beginHandoffFade(strokeId: String) {
+        guard let index = handoffs.firstIndex(where: { $0.id == strokeId }) else { return }
+        if handoffs[index].fadeStart == nil {
+            handoffs[index].fadeStart = CACurrentMediaTime() + handoffFadeLead
+        }
+    }
+
+    /// The webview's copy is at full opacity: drop ours at once.
+    func endHandoffFade(strokeId: String) {
+        handoffs.removeAll { $0.id == strokeId }
+        rebuildRenderer(mode: .dirty)
+        if handoffs.isEmpty {
+            handoffDisplayLink?.invalidate()
+            handoffDisplayLink = nil
+        }
+    }
+
+    private func ensureHandoffDisplayLink() {
+        guard handoffDisplayLink == nil else { return }
         let displayLink = CADisplayLink(target: self, selector: #selector(handleHandoffFrame))
         if #available(iOS 15.0, *) {
             displayLink.preferredFrameRateRange = CAFrameRateRange(
@@ -334,27 +413,36 @@ final class MetalCanvasView: MTKView {
     }
 
     @objc private func handleHandoffFrame(_ displayLink: CADisplayLink) {
-        guard handoffStroke != nil else {
-            clearHandoffStroke()
+        let now = displayLink.timestamp
+        var fading = false
+        for index in handoffs.indices {
+            if handoffs[index].fadeStart == nil,
+                now - handoffs[index].createdAt > handoffFadeTimeout
+            {
+                handoffs[index].fadeStart = now
+            }
+            if handoffs[index].fadeStart != nil {
+                fading = true
+            }
+        }
+        handoffs.removeAll { $0.progress(at: now, duration: handoffFadeDuration) >= 1.0 }
+
+        if handoffs.isEmpty {
+            displayLink.invalidate()
+            handoffDisplayLink = nil
             rebuildRenderer(mode: .dirty)
             return
         }
-
-        let startTime = handoffFadeStartTime ?? displayLink.timestamp
-        let progress = min(1.0, max(0.0, (displayLink.timestamp - startTime) / handoffFadeDuration))
-        handoffOpacity = CGFloat(1.0 - progress)
-        rebuildRenderer(mode: progress >= 1.0 ? .dirty : .drawing)
-
-        if progress >= 1.0 {
-            clearHandoffStroke()
+        // Only redraw while something actually changes; holding copies cost
+        // nothing per frame.
+        if fading || strokeStorage.activeStroke == nil {
+            rebuildRenderer(mode: .dirty)
         }
     }
 
-    private func clearHandoffStroke() {
+    private func clearHandoffs() {
         handoffDisplayLink?.invalidate()
         handoffDisplayLink = nil
-        handoffFadeStartTime = nil
-        handoffStroke = nil
-        handoffOpacity = 1.0
+        handoffs.removeAll()
     }
 }

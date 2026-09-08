@@ -307,6 +307,18 @@
           "markdownDescription": "Denies the activate_pen command without any pre-configured scope."
         },
         {
+          "description": "Enables the begin_stroke_fade command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-begin-stroke-fade",
+          "markdownDescription": "Enables the begin_stroke_fade command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the begin_stroke_fade command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-begin-stroke-fade",
+          "markdownDescription": "Denies the begin_stroke_fade command without any pre-configured scope."
+        },
+        {
           "description": "Enables the clear command without any pre-configured scope.",
           "type": "string",
           "const": "allow-clear",
@@ -329,6 +341,18 @@
           "type": "string",
           "const": "deny-deactivate-pen",
           "markdownDescription": "Denies the deactivate_pen command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the end_stroke_fade command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-end-stroke-fade",
+          "markdownDescription": "Enables the end_stroke_fade command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the end_stroke_fade command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-end-stroke-fade",
+          "markdownDescription": "Denies the end_stroke_fade command without any pre-configured scope."
         },
         {
           "description": "Enables the export_image command without any pre-configured scope.",
@@ -451,10 +475,10 @@
           "markdownDescription": "Denies the undo command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the canvas plugin\n#### This default permission set includes:\n\n- `allow-show-canvas`\n- `allow-hide-canvas`\n- `allow-is-available`\n- `allow-activate-pen`\n- `allow-deactivate-pen`\n- `allow-clear`\n- `allow-undo`\n- `allow-redo`\n- `allow-get-strokes`\n- `allow-export-image`\n- `allow-export-latest-stroke-fragment`\n- `allow-register-listener`\n- `allow-remove-listener`",
+          "description": "Default permissions for the canvas plugin\n#### This default permission set includes:\n\n- `allow-show-canvas`\n- `allow-hide-canvas`\n- `allow-is-available`\n- `allow-activate-pen`\n- `allow-deactivate-pen`\n- `allow-clear`\n- `allow-undo`\n- `allow-redo`\n- `allow-get-strokes`\n- `allow-export-image`\n- `allow-export-latest-stroke-fragment`\n- `allow-begin-stroke-fade`\n- `allow-end-stroke-fade`\n- `allow-register-listener`\n- `allow-remove-listener`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Default permissions for the canvas plugin\n#### This default permission set includes:\n\n- `allow-show-canvas`\n- `allow-hide-canvas`\n- `allow-is-available`\n- `allow-activate-pen`\n- `allow-deactivate-pen`\n- `allow-clear`\n- `allow-undo`\n- `allow-redo`\n- `allow-get-strokes`\n- `allow-export-image`\n- `allow-export-latest-stroke-fragment`\n- `allow-register-listener`\n- `allow-remove-listener`"
+          "markdownDescription": "Default permissions for the canvas plugin\n#### This default permission set includes:\n\n- `allow-show-canvas`\n- `allow-hide-canvas`\n- `allow-is-available`\n- `allow-activate-pen`\n- `allow-deactivate-pen`\n- `allow-clear`\n- `allow-undo`\n- `allow-redo`\n- `allow-get-strokes`\n- `allow-export-image`\n- `allow-export-latest-stroke-fragment`\n- `allow-begin-stroke-fade`\n- `allow-end-stroke-fade`\n- `allow-register-listener`\n- `allow-remove-listener`"
         }
       ]
     }
