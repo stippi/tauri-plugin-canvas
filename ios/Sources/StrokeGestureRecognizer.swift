@@ -13,6 +13,11 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
 
     private(set) var trackedTouch: UITouch?
     private(set) var coalescedTouches: [UITouch] = []
+    /// UIKit's prediction of where the tracked touch is heading (a few
+    /// samples ahead). Only meaningful while the gesture is `.changed`;
+    /// consumers must redraw them from scratch on every update, never
+    /// accumulate them.
+    private(set) var predictedTouches: [UITouch] = []
 
     /// Direct touches don't begin the gesture immediately: quick taps and
     /// two-finger zoom/pan gestures must pass through to the web view. The
@@ -83,6 +88,7 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
 
         trackedTouch = touch
         coalescedTouches = event.coalescedTouches(for: touch) ?? [touch]
+        predictedTouches = []
 
         if touch.type == .pencil {
             state = .began
@@ -95,6 +101,7 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
         guard let trackedTouch, touches.contains(trackedTouch) else { return }
         coalescedTouches = event.coalescedTouches(for: trackedTouch) ?? [trackedTouch]
+        predictedTouches = event.predictedTouches(for: trackedTouch) ?? []
 
         if pendingDirectTouch {
             let loc = location(of: trackedTouch)
@@ -113,6 +120,7 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
         guard let trackedTouch, touches.contains(trackedTouch) else { return }
         coalescedTouches = event.coalescedTouches(for: trackedTouch) ?? [trackedTouch]
+        predictedTouches = []
         if pendingDirectTouch {
             // Lifted before the movement threshold → a tap. Let the web view
             // handle it (tappable scene elements keep working in pen mode).
@@ -125,12 +133,14 @@ final class StrokeGestureRecognizer: UIGestureRecognizer {
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
         guard let trackedTouch, touches.contains(trackedTouch) else { return }
         coalescedTouches = []
+        predictedTouches = []
         state = pendingDirectTouch ? .failed : .cancelled
     }
 
     override func reset() {
         trackedTouch = nil
         coalescedTouches = []
+        predictedTouches = []
         pendingDirectTouch = false
     }
 

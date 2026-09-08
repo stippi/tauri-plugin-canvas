@@ -23,6 +23,20 @@ export interface CanvasConfig {
   placement?: CanvasPlacement;
 }
 
+/**
+ * Who renders a drawing stroke.
+ *
+ * - `native` (default): the Metal overlay draws the in-progress stroke,
+ *   stores it and exports it as a PNG fragment on request
+ *   (`exportLatestStrokeFragment`).
+ * - `forward`: nothing is drawn or stored natively. Every touch update
+ *   arrives as a `strokeSampled` event (real samples plus UIKit's current
+ *   prediction) and `strokeEnded` carries `forwarded: true`; the webview
+ *   renders the stroke itself. Native undo/redo/export have nothing to
+ *   work on in this mode.
+ */
+export type StrokeRendering = "native" | "forward";
+
 export interface PenConfig {
   tool?: "draw" | "erase";
   style?: "smooth" | "marker" | "pencil";
@@ -33,14 +47,23 @@ export interface PenConfig {
   /** Whether direct (finger / capacitive stylus) touches draw too.
    *  Apple Pencil always draws. Default: false. */
   fingerDrawing?: boolean;
+  /** Default: `"native"`. */
+  strokeRendering?: StrokeRendering;
 }
 
 export interface StrokePoint {
+  /** Percent of the drawing rect (0..100). */
   x: number;
   y: number;
+  /** 0..1 (0.5 for touches without force). */
   pressure: number;
+  /** Radians. */
   altitude: number;
   azimuth: number;
+  /** Apple Pencil Pro barrel roll in radians (0 otherwise). Only present on
+   *  sampled events (`strokeSampled`, `eraserStrokeSampled`). */
+  roll?: number;
+  /** Seconds since boot (`UITouch.timestamp`). */
   timestamp: number;
 }
 
@@ -58,8 +81,28 @@ export interface StrokeStartEvent {
 
 export interface StrokeEndEvent {
   strokeId: string;
+  /** Empty for forwarded strokes (the webview already has every sample). */
   points: StrokePoint[];
   boundingBox: Rect;
+  /** True when the stroke was rendered by the webview (`strokeRendering:
+   *  "forward"`) — there is no native fragment to export. */
+  forwarded?: boolean;
+  /** Forwarded strokes only: discarded (second finger, pen mode switched
+   *  mid-stroke) — drop the live stroke instead of committing it. */
+  cancelled?: boolean;
+}
+
+/** `strokeRendering: "forward"` only: one touch update of the in-progress
+ *  stroke. `points` are new real samples to append; `predicted` is UIKit's
+ *  current guess of the next few positions — draw them after the real
+ *  samples and replace them wholesale on the next event. */
+export interface StrokeSampledEvent {
+  strokeId: string;
+  points: StrokePoint[];
+  predicted: StrokePoint[];
+  /** Seconds since boot when the plugin emitted the event (same clock as
+   *  the sample timestamps). */
+  sentAt: number;
 }
 
 export interface EraserStrokeStartEvent {
@@ -141,6 +184,7 @@ export async function activatePen(config: PenConfig = {}): Promise<void> {
       opacity: config.opacity ?? 1.0,
       pressureSensitivity: config.pressureSensitivity ?? 0.8,
       fingerDrawing: config.fingerDrawing ?? false,
+      strokeRendering: config.strokeRendering ?? "native",
     },
   });
 }
@@ -208,6 +252,21 @@ export async function onStrokeEnded(
   }
 
   return listen<StrokeEndEvent>("plugin:canvas:strokeEnded", (event) => {
+    handler(event.payload);
+  });
+}
+
+export async function onStrokeSampled(
+  handler: (event: StrokeSampledEvent) => void,
+): Promise<UnlistenFn> {
+  if (isMobilePlatform()) {
+    const listener = await addPluginListener<StrokeSampledEvent>("canvas", "strokeSampled", handler);
+    return async () => {
+      await listener.unregister();
+    };
+  }
+
+  return listen<StrokeSampledEvent>("plugin:canvas:strokeSampled", (event) => {
     handler(event.payload);
   });
 }

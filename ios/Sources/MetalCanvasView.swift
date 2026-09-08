@@ -4,6 +4,14 @@ import UIKit
 protocol MetalCanvasViewDelegate: AnyObject {
     func metalCanvasView(_ view: MetalCanvasView, didStartStroke strokeId: String)
     func metalCanvasView(_ view: MetalCanvasView, didEndStroke stroke: CanvasStroke)
+    /// Forwarded rendering only: new real samples plus UIKit's current
+    /// prediction of the touch's next positions (replace, never accumulate).
+    func metalCanvasView(
+        _ view: MetalCanvasView, didSampleStroke strokeId: String,
+        samples: [CanvasStrokeSample], predicted: [CanvasStrokeSample])
+    /// Forwarded rendering only: the stroke ended; nothing was stored natively.
+    func metalCanvasView(
+        _ view: MetalCanvasView, didEndForwardedStroke strokeId: String, cancelled: Bool)
     func metalCanvasView(_ view: MetalCanvasView, didStartEraserStroke stroke: ActiveEraserStroke)
     func metalCanvasView(
         _ view: MetalCanvasView, didSampleEraserStroke strokeId: String,
@@ -26,6 +34,12 @@ final class MetalCanvasView: MTKView {
     private var strokeRenderer: StrokeRenderer?
     private var handoffStroke: ActiveStroke?
     private var activeEraserStroke: ActiveEraserStroke?
+    /// Id of the in-progress stroke while the webview renders (`.forward`).
+    /// Such strokes never touch `strokeStorage` or the renderer.
+    private var forwardedStrokeId: String?
+    private var forwardsStrokes: Bool {
+        (penConfig.strokeRendering ?? .native) == .forward
+    }
     private var handoffOpacity: CGFloat = 1.0
     private var handoffDisplayLink: CADisplayLink?
     private var handoffFadeStartTime: CFTimeInterval?
@@ -83,6 +97,12 @@ final class MetalCanvasView: MTKView {
     }
 
     func updatePen(_ config: CanvasPenConfig) {
+        if let forwarded = forwardedStrokeId, (config.strokeRendering ?? .native) != .forward {
+            // The webview stops rendering mid-stroke: end its stroke cleanly
+            // instead of leaving a live stroke without an end event.
+            forwardedStrokeId = nil
+            strokeDelegate?.metalCanvasView(self, didEndForwardedStroke: forwarded, cancelled: true)
+        }
         penConfig = config
         let fingerDrawing = config.fingerDrawing ?? false
         strokeRecognizer.allowsFingerDrawing = fingerDrawing
@@ -200,6 +220,16 @@ final class MetalCanvasView: MTKView {
                     baseWidth: stroke.baseWidth,
                     pressureSensitivity: stroke.pressureSensitivity
                 )
+            } else if forwardsStrokes {
+                let strokeId = UUID().uuidString
+                forwardedStrokeId = strokeId
+                strokeDelegate?.metalCanvasView(self, didStartStroke: strokeId)
+                strokeDelegate?.metalCanvasView(
+                    self,
+                    didSampleStroke: strokeId,
+                    samples: [sample],
+                    predicted: predictedSamples(from: recognizer)
+                )
             } else {
                 let strokeId = strokeStorage.beginStroke(sample: sample, pen: penConfig)
                 rebuildRenderer(mode: .drawing)
@@ -219,6 +249,14 @@ final class MetalCanvasView: MTKView {
                     samples: samples,
                     baseWidth: stroke.baseWidth,
                     pressureSensitivity: stroke.pressureSensitivity
+                )
+            } else if forwardsStrokes {
+                guard let strokeId = forwardedStrokeId else { return }
+                strokeDelegate?.metalCanvasView(
+                    self,
+                    didSampleStroke: strokeId,
+                    samples: samples,
+                    predicted: predictedSamples(from: recognizer)
                 )
             } else {
                 samples.forEach { strokeStorage.append(sample: $0) }
@@ -243,6 +281,15 @@ final class MetalCanvasView: MTKView {
                 activeEraserStroke = nil
                 rebuildRenderer(mode: .dirty)
                 strokeDelegate?.metalCanvasView(self, didEndEraserStroke: stroke.id, cancelled: false)
+            } else if forwardsStrokes {
+                guard let strokeId = forwardedStrokeId else { return }
+                forwardedStrokeId = nil
+                if !samples.isEmpty {
+                    strokeDelegate?.metalCanvasView(
+                        self, didSampleStroke: strokeId, samples: samples, predicted: [])
+                }
+                strokeDelegate?.metalCanvasView(
+                    self, didEndForwardedStroke: strokeId, cancelled: false)
             } else {
                 samples.forEach { strokeStorage.append(sample: $0) }
                 if let stroke = strokeStorage.finishStroke() {
@@ -271,6 +318,12 @@ final class MetalCanvasView: MTKView {
                 // cancelled eraser stroke would leave a stale preview applied.
                 strokeDelegate?.metalCanvasView(self, didEndEraserStroke: eraser.id, cancelled: true)
             }
+            if let forwarded = forwardedStrokeId {
+                forwardedStrokeId = nil
+                // Same for a webview-rendered stroke: drop it, don't commit it.
+                strokeDelegate?.metalCanvasView(
+                    self, didEndForwardedStroke: forwarded, cancelled: true)
+            }
             // Discard, don't commit: a cancelled stroke must neither reach the
             // webview nor occupy a slot in the undo stack (a committed ghost
             // stroke would desync native undo from the webview's op stack).
@@ -298,6 +351,10 @@ final class MetalCanvasView: MTKView {
             roll: roll,
             timestamp: touch.timestamp
         )
+    }
+
+    private func predictedSamples(from recognizer: StrokeGestureRecognizer) -> [CanvasStrokeSample] {
+        recognizer.predictedTouches.map(makeSample).filter { drawingRect.contains($0.location) }
     }
 
     private func rebuildRenderer(mode: StrokeRenderer.RenderMode) {

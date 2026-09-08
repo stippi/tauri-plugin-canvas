@@ -43,6 +43,7 @@ async function activatePen(config = {}) {
             opacity: config.opacity ?? 1.0,
             pressureSensitivity: config.pressureSensitivity ?? 0.8,
             fingerDrawing: config.fingerDrawing ?? false,
+            strokeRendering: config.strokeRendering ?? "native",
         },
     });
 }
@@ -95,6 +96,17 @@ async function onStrokeEnded(handler) {
         };
     }
     return event.listen("plugin:canvas:strokeEnded", (event) => {
+        handler(event.payload);
+    });
+}
+async function onStrokeSampled(handler) {
+    if (isMobilePlatform()) {
+        const listener = await core.addPluginListener("canvas", "strokeSampled", handler);
+        return async () => {
+            await listener.unregister();
+        };
+    }
+    return event.listen("plugin:canvas:strokeSampled", (event) => {
         handler(event.payload);
     });
 }
@@ -187,6 +199,7 @@ exports.onEraserStrokeEnded = onEraserStrokeEnded;
 exports.onEraserStrokeSampled = onEraserStrokeSampled;
 exports.onEraserStrokeStarted = onEraserStrokeStarted;
 exports.onStrokeEnded = onStrokeEnded;
+exports.onStrokeSampled = onStrokeSampled;
 exports.onStrokeStarted = onStrokeStarted;
 exports.onStrokesCleared = onStrokesCleared;
 exports.redo = redo;

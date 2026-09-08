@@ -58,6 +58,17 @@ pub enum PenStyle {
     Pencil,
 }
 
+/// Who renders a drawing stroke: the native Metal overlay (`Native`, the
+/// default: draws, stores, exports PNG fragments) or the webview (`Forward`:
+/// the overlay only forwards touch samples as `strokeSampled` events).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum StrokeRendering {
+    #[default]
+    Native,
+    Forward,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PenConfig {
@@ -76,6 +87,8 @@ pub struct PenConfig {
     /// Whether direct (finger / capacitive stylus) touches draw too.
     #[serde(default)]
     pub finger_drawing: bool,
+    #[serde(default)]
+    pub stroke_rendering: StrokeRendering,
 }
 
 impl Default for PenConfig {
@@ -88,6 +101,7 @@ impl Default for PenConfig {
             opacity: default_opacity(),
             pressure_sensitivity: default_pressure_sensitivity(),
             finger_drawing: false,
+            stroke_rendering: StrokeRendering::default(),
         }
     }
 }

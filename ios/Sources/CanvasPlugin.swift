@@ -366,6 +366,40 @@ extension CanvasPlugin: MetalCanvasViewDelegate {
         )
     }
 
+    func metalCanvasView(
+        _ view: MetalCanvasView, didSampleStroke strokeId: String,
+        samples: [CanvasStrokeSample], predicted: [CanvasStrokeSample]
+    ) {
+        let bounds = view.currentDrawingRect
+        emitEvent(
+            "strokeSampled",
+            data: [
+                "strokeId": strokeId,
+                "points": samples.map { samplePayload($0, within: bounds) } as JSArray,
+                "predicted": predicted.map { samplePayload($0, within: bounds) } as JSArray,
+                // Same clock as the samples' timestamps (seconds since boot):
+                // lets the webview measure UIKit → plugin delivery lag.
+                "sentAt": CACurrentMediaTime(),
+            ] as JSObject
+        )
+    }
+
+    func metalCanvasView(
+        _ view: MetalCanvasView, didEndForwardedStroke strokeId: String, cancelled: Bool
+    ) {
+        emitDebug("didEndForwardedStroke \(strokeId) cancelled=\(cancelled)")
+        emitEvent(
+            "strokeEnded",
+            data: [
+                "strokeId": strokeId,
+                "points": [] as JSArray,
+                "boundingBox": ["x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0] as JSObject,
+                "forwarded": true,
+                "cancelled": cancelled,
+            ] as JSObject
+        )
+    }
+
     func metalCanvasView(_ view: MetalCanvasView, didStartEraserStroke stroke: ActiveEraserStroke) {
         emitDebug("didStartEraserStroke \(stroke.id)")
         emitEvent(
@@ -385,17 +419,7 @@ extension CanvasPlugin: MetalCanvasViewDelegate {
         baseWidth: CGFloat,
         pressureSensitivity: CGFloat
     ) {
-        let points: JSArray = samples.map { sample in
-            let normalized = normalize(sample: sample, within: view.currentDrawingRect)
-            return [
-                "x": Double(normalized.x),
-                "y": Double(normalized.y),
-                "pressure": Double(normalized.pressure),
-                "altitude": Double(normalized.altitude),
-                "azimuth": Double(normalized.azimuth),
-                "timestamp": normalized.timestamp,
-            ] as JSObject
-        }
+        let points: JSArray = samples.map { samplePayload($0, within: view.currentDrawingRect) }
         emitEvent(
             "eraserStrokeSampled",
             data: [
@@ -423,17 +447,21 @@ extension CanvasPlugin: MetalCanvasViewDelegate {
         emitClearEvent("strokesCleared")
     }
 
-    private func normalize(sample: CanvasStrokeSample, within bounds: CGRect) -> CanvasPoint {
+    /// A sample as the webview sees it: position in percent of the drawing
+    /// rect, pressure clamped, angles in radians, timestamp in seconds since
+    /// boot (`UITouch.timestamp`).
+    private func samplePayload(_ sample: CanvasStrokeSample, within bounds: CGRect) -> JSObject {
         let width = max(bounds.width, 1.0)
         let height = max(bounds.height, 1.0)
-        return CanvasPoint(
-            x: (sample.location.x - bounds.minX) / width * 100.0,
-            y: (sample.location.y - bounds.minY) / height * 100.0,
-            pressure: max(0.0, min(1.0, sample.pressure)),
-            altitude: sample.altitude,
-            azimuth: sample.azimuth,
-            timestamp: sample.timestamp
-        )
+        return [
+            "x": Double((sample.location.x - bounds.minX) / width * 100.0),
+            "y": Double((sample.location.y - bounds.minY) / height * 100.0),
+            "pressure": Double(max(0.0, min(1.0, sample.pressure))),
+            "altitude": Double(sample.altitude),
+            "azimuth": Double(sample.azimuth),
+            "roll": Double(sample.roll),
+            "timestamp": sample.timestamp,
+        ] as JSObject
     }
 }
 

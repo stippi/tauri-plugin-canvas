@@ -41,6 +41,7 @@ async function activatePen(config = {}) {
             opacity: config.opacity ?? 1.0,
             pressureSensitivity: config.pressureSensitivity ?? 0.8,
             fingerDrawing: config.fingerDrawing ?? false,
+            strokeRendering: config.strokeRendering ?? "native",
         },
     });
 }
@@ -93,6 +94,17 @@ async function onStrokeEnded(handler) {
         };
     }
     return listen("plugin:canvas:strokeEnded", (event) => {
+        handler(event.payload);
+    });
+}
+async function onStrokeSampled(handler) {
+    if (isMobilePlatform()) {
+        const listener = await addPluginListener("canvas", "strokeSampled", handler);
+        return async () => {
+            await listener.unregister();
+        };
+    }
+    return listen("plugin:canvas:strokeSampled", (event) => {
         handler(event.payload);
     });
 }
@@ -172,5 +184,5 @@ function isMobilePlatform() {
     return false;
 }
 
-export { activatePen, clear, deactivatePen, exportImage, exportLatestStrokeFragment, getStrokes, hideCanvas, isAvailable, onDebug, onEraserStrokeEnded, onEraserStrokeSampled, onEraserStrokeStarted, onStrokeEnded, onStrokeStarted, onStrokesCleared, redo, showCanvas, undo };
+export { activatePen, clear, deactivatePen, exportImage, exportLatestStrokeFragment, getStrokes, hideCanvas, isAvailable, onDebug, onEraserStrokeEnded, onEraserStrokeSampled, onEraserStrokeStarted, onStrokeEnded, onStrokeSampled, onStrokeStarted, onStrokesCleared, redo, showCanvas, undo };
 //# sourceMappingURL=index.js.map

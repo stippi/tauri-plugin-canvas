@@ -44,6 +44,16 @@ struct CanvasPenConfig: Decodable {
         case pencil
     }
 
+    /// Who renders a drawing stroke. `native`: the Metal overlay draws the
+    /// in-progress stroke, stores it and exports it as a PNG fragment on
+    /// request. `forward`: nothing is drawn or stored natively — every
+    /// touch update is forwarded as a `strokeSampled` event (real and
+    /// predicted samples) and the webview renders the stroke itself.
+    enum StrokeRendering: String, Decodable {
+        case native
+        case forward
+    }
+
     let tool: Tool?
     let style: Style?
     let color: String?
@@ -52,6 +62,7 @@ struct CanvasPenConfig: Decodable {
     let pressureSensitivity: CGFloat?
     /// Whether direct (finger / capacitive stylus) touches draw too.
     let fingerDrawing: Bool?
+    let strokeRendering: StrokeRendering?
 
     static let `default` = CanvasPenConfig(
         tool: .draw,
@@ -60,7 +71,8 @@ struct CanvasPenConfig: Decodable {
         width: 2.0,
         opacity: 1.0,
         pressureSensitivity: 0.8,
-        fingerDrawing: false
+        fingerDrawing: false,
+        strokeRendering: .native
     )
 }
 
