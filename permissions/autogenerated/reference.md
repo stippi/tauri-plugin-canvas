@@ -15,6 +15,8 @@ Default permissions for the canvas plugin
 - `allow-get-strokes`
 - `allow-export-image`
 - `allow-export-latest-stroke-fragment`
+- `allow-begin-stroke-fade`
+- `allow-end-stroke-fade`
 - `allow-register-listener`
 - `allow-remove-listener`
 
@@ -49,6 +51,32 @@ Enables the activate_pen command without any pre-configured scope.
 <td>
 
 Denies the activate_pen command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`canvas:allow-begin-stroke-fade`
+
+</td>
+<td>
+
+Enables the begin_stroke_fade command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`canvas:deny-begin-stroke-fade`
+
+</td>
+<td>
+
+Denies the begin_stroke_fade command without any pre-configured scope.
 
 </td>
 </tr>
@@ -101,6 +129,32 @@ Enables the deactivate_pen command without any pre-configured scope.
 <td>
 
 Denies the deactivate_pen command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`canvas:allow-end-stroke-fade`
+
+</td>
+<td>
+
+Enables the end_stroke_fade command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`canvas:deny-end-stroke-fade`
+
+</td>
+<td>
+
+Denies the end_stroke_fade command without any pre-configured scope.
 
 </td>
 </tr>

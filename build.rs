@@ -10,6 +10,8 @@ const COMMANDS: &[&str] = &[
     "get_strokes",
     "export_image",
     "export_latest_stroke_fragment",
+    "begin_stroke_fade",
+    "end_stroke_fade",
     "register_listener",
     "remove_listener",
 ];
