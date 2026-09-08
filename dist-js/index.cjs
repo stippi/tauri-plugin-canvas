@@ -92,6 +92,7 @@ async function endStrokeFade(strokeId) {
 }
 /** Duration of the hand-over cross-fade, identical on both sides. */
 const STROKE_FADE_MS = 400;
+
 async function onStrokeStarted(handler) {
     if (isMobilePlatform()) {
         const listener = await core.addPluginListener("canvas", "strokeStarted", handler);
