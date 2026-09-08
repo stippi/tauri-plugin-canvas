@@ -83,6 +83,39 @@ private let shaderSource = """
       return clamp(tooth * dense * speckle * gaps, 0.0, 1.0);
     }
 
+    struct QuadVertexIn {
+      float2 position;
+      float2 uv;
+    };
+
+    struct QuadVertexOut {
+      float4 position [[position]];
+      float2 uv;
+    };
+
+    vertex QuadVertexOut handoff_vertex(const device QuadVertexIn* vertices [[buffer(0)]], uint id [[vertex_id]]) {
+      QuadVertexOut out;
+      out.position = float4(vertices[id].position, 0.0, 1.0);
+      out.uv = vertices[id].uv;
+      return out;
+    }
+
+    // Complement of the webview's linear fade-in: with the webview's copy
+    // at alpha a*t underneath, drawing this copy at a*(1-t)/(1-a*t) on top
+    // makes the source-over of both exactly the original pixel (alpha a)
+    // for every t. Premultiplied in, premultiplied out.
+    fragment float4 handoff_fragment(QuadVertexOut in [[stage_in]], texture2d<float> strokeTexture [[texture(0)]], constant float& progress [[buffer(0)]]) {
+      constexpr sampler strokeSampler(coord::normalized, filter::nearest, address::clamp_to_edge);
+      float4 color = strokeTexture.sample(strokeSampler, in.uv);
+      float a = color.a;
+      if (a <= 0.0) {
+        return float4(0.0);
+      }
+      float t = clamp(progress, 0.0, 1.0);
+      float am = a * (1.0 - t) / max(1.0 - a * t, 1e-4);
+      return color * (am / a);
+    }
+
     fragment float4 stroke_fragment(VertexOut in [[stage_in]], texture2d<float> paperTexture [[texture(0)]]) {
       float4 color = in.color;
       if (in.style > 1.5) {
@@ -106,12 +139,29 @@ struct StrokeRenderVertex {
     var style: Float
 }
 
+private struct HandoffQuadVertex {
+    var position: SIMD2<Float>
+    var uv: SIMD2<Float>
+}
+
+/// A committed stroke shown from its pre-rendered texture while the webview
+/// takes it over. `bounds` is the texture's footprint in view points, snapped
+/// to the device pixel grid so the texels map 1:1 onto the drawable.
+struct HandoffQuad {
+    let texture: MTLTexture
+    let bounds: CGRect
+    /// 0 = only this copy is visible, 1 = only the webview's copy.
+    let progress: Float
+}
+
 final class StrokeRenderer: NSObject, MTKViewDelegate {
     private weak var metalView: MTKView?
     private let commandQueue: MTLCommandQueue
     private let normalPipelineState: MTLRenderPipelineState
     private let markerPipelineState: MTLRenderPipelineState
+    private let handoffPipelineState: MTLRenderPipelineState
     private let paperTexture: MTLTexture
+    private var handoffQuads: [HandoffQuad] = []
     private var committedNormalVertexBuffer: MTLBuffer?
     private var committedMarkerVertexBuffer: MTLBuffer?
     private var activeNormalVertexBuffer: MTLBuffer?
@@ -136,6 +186,8 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
             let library = try? device.makeLibrary(source: shaderSource, options: nil),
             let vertexFunction = library.makeFunction(name: "stroke_vertex"),
             let fragmentFunction = library.makeFunction(name: "stroke_fragment"),
+            let handoffVertexFunction = library.makeFunction(name: "handoff_vertex"),
+            let handoffFragmentFunction = library.makeFunction(name: "handoff_fragment"),
             let paperTexture = PencilTexture.makeMetalTexture(device: device)
         else {
             return nil
@@ -167,11 +219,26 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
         markerDescriptor.colorAttachments[0].destinationRGBBlendFactor = .one
         markerDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .one
 
+        let handoffDescriptor = MTLRenderPipelineDescriptor()
+        handoffDescriptor.vertexFunction = handoffVertexFunction
+        handoffDescriptor.fragmentFunction = handoffFragmentFunction
+        handoffDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        handoffDescriptor.rasterSampleCount = metalView.sampleCount
+        handoffDescriptor.colorAttachments[0].isBlendingEnabled = true
+        handoffDescriptor.colorAttachments[0].rgbBlendOperation = .add
+        handoffDescriptor.colorAttachments[0].alphaBlendOperation = .add
+        handoffDescriptor.colorAttachments[0].sourceRGBBlendFactor = .one
+        handoffDescriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
+        handoffDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+        handoffDescriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+
         guard
             let normalPipelineState = try? device.makeRenderPipelineState(
                 descriptor: normalDescriptor),
             let markerPipelineState = try? device.makeRenderPipelineState(
-                descriptor: markerDescriptor)
+                descriptor: markerDescriptor),
+            let handoffPipelineState = try? device.makeRenderPipelineState(
+                descriptor: handoffDescriptor)
         else {
             return nil
         }
@@ -180,12 +247,14 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
         self.commandQueue = commandQueue
         self.normalPipelineState = normalPipelineState
         self.markerPipelineState = markerPipelineState
+        self.handoffPipelineState = handoffPipelineState
         self.paperTexture = paperTexture
         super.init()
     }
 
-    func update(committed: [ActiveStroke], active: ActiveStroke?) {
+    func update(committed: [ActiveStroke], active: ActiveStroke?, handoffs: [HandoffQuad] = []) {
         guard let device = metalView?.device else { return }
+        handoffQuads = handoffs
         let committedNormalVertices =
             committed
             .filter { $0.style != .marker }
@@ -279,18 +348,35 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
                 type: .triangle, vertexStart: 0, vertexCount: committedNormalVertexCount)
         }
 
-        if let buffer = activeNormalVertexBuffer, activeNormalVertexCount > 0 {
-            encoder.setRenderPipelineState(normalPipelineState)
-            encoder.setVertexBuffer(buffer, offset: 0, index: 0)
-            encoder.drawPrimitives(
-                type: .triangle, vertexStart: 0, vertexCount: activeNormalVertexCount)
-        }
-
         if let buffer = committedMarkerVertexBuffer, committedMarkerVertexCount > 0 {
             encoder.setRenderPipelineState(markerPipelineState)
             encoder.setVertexBuffer(buffer, offset: 0, index: 0)
             encoder.drawPrimitives(
                 type: .triangle, vertexStart: 0, vertexCount: committedMarkerVertexCount)
+        }
+
+        // Committed strokes on their way to the webview: below the active
+        // stroke, each from its own texture with its own fade progress.
+        if !handoffQuads.isEmpty {
+            encoder.setRenderPipelineState(handoffPipelineState)
+            for quad in handoffQuads {
+                var vertices = handoffVertices(for: quad.bounds, in: view.bounds)
+                var progress = quad.progress
+                encoder.setVertexBytes(
+                    &vertices, length: MemoryLayout<HandoffQuadVertex>.stride * vertices.count,
+                    index: 0)
+                encoder.setFragmentTexture(quad.texture, index: 0)
+                encoder.setFragmentBytes(&progress, length: MemoryLayout<Float>.size, index: 0)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertices.count)
+            }
+            encoder.setFragmentTexture(paperTexture, index: 0)
+        }
+
+        if let buffer = activeNormalVertexBuffer, activeNormalVertexCount > 0 {
+            encoder.setRenderPipelineState(normalPipelineState)
+            encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+            encoder.drawPrimitives(
+                type: .triangle, vertexStart: 0, vertexCount: activeNormalVertexCount)
         }
 
         if let buffer = activeMarkerVertexBuffer, activeMarkerVertexCount > 0 {
@@ -405,6 +491,23 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    private func handoffVertices(for bounds: CGRect, in viewBounds: CGRect) -> [HandoffQuadVertex] {
+        let topLeft = normalizedPoint(CGPoint(x: bounds.minX, y: bounds.minY), in: viewBounds)
+        let topRight = normalizedPoint(CGPoint(x: bounds.maxX, y: bounds.minY), in: viewBounds)
+        let bottomLeft = normalizedPoint(CGPoint(x: bounds.minX, y: bounds.maxY), in: viewBounds)
+        let bottomRight = normalizedPoint(CGPoint(x: bounds.maxX, y: bounds.maxY), in: viewBounds)
+        // Texture row 0 is the top of the fragment (render targets and the
+        // CGImage export agree on that), so v = 0 at the top edge.
+        return [
+            HandoffQuadVertex(position: topLeft, uv: SIMD2(0, 0)),
+            HandoffQuadVertex(position: topRight, uv: SIMD2(1, 0)),
+            HandoffQuadVertex(position: bottomRight, uv: SIMD2(1, 1)),
+            HandoffQuadVertex(position: topLeft, uv: SIMD2(0, 0)),
+            HandoffQuadVertex(position: bottomRight, uv: SIMD2(1, 1)),
+            HandoffQuadVertex(position: bottomLeft, uv: SIMD2(0, 1)),
+        ]
+    }
+
     private func normalizedPoint(_ point: CGPoint, in bounds: CGRect) -> SIMD2<Float> {
         let x = Float(((point.x - bounds.minX) / max(bounds.width, 1.0)) * 2.0 - 1.0)
         let y = Float(1.0 - ((point.y - bounds.minY) / max(bounds.height, 1.0)) * 2.0)
@@ -418,11 +521,27 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
     func renderStrokeToImage(
         _ stroke: ActiveStroke, in canvasBounds: CGRect, fragmentBounds: CGRect
     ) -> UIImage? {
+        guard
+            let texture = renderStrokeToTexture(
+                stroke, in: canvasBounds, fragmentBounds: fragmentBounds)
+        else {
+            return nil
+        }
+        return image(from: texture)
+    }
+
+    /// Render a single stroke into an offscreen texture covering
+    /// `fragmentBounds` (one texel per device pixel, MSAA-resolved). This is
+    /// what the hand-over shows on screen and what the webview receives, so
+    /// both copies are the same pixels.
+    func renderStrokeToTexture(
+        _ stroke: ActiveStroke, in canvasBounds: CGRect, fragmentBounds: CGRect
+    ) -> MTLTexture? {
         guard let device = metalView?.device else { return nil }
 
         let scale = UIScreen.main.scale
-        let pixelWidth = max(1, Int(ceil(fragmentBounds.width * scale)))
-        let pixelHeight = max(1, Int(ceil(fragmentBounds.height * scale)))
+        let pixelWidth = max(1, Int((fragmentBounds.width * scale).rounded()))
+        let pixelHeight = max(1, Int((fragmentBounds.height * scale).rounded()))
 
         // --- Build vertices against the fragment bounds ---------------------
         let vertices = makeVerticesForExport(
@@ -497,8 +616,15 @@ final class StrokeRenderer: NSObject, MTKViewDelegate {
         encoder.endEncoding()
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
+        return resolveTexture
+    }
 
-        // --- Read back pixels -----------------------------------------------
+    /// Read a rendered fragment texture back into a `UIImage` (for the PNG
+    /// export to the webview).
+    func image(from resolveTexture: MTLTexture) -> UIImage? {
+        let scale = UIScreen.main.scale
+        let pixelWidth = resolveTexture.width
+        let pixelHeight = resolveTexture.height
         let bytesPerRow = pixelWidth * 4
         var pixelData = [UInt8](repeating: 0, count: pixelWidth * pixelHeight * 4)
         resolveTexture.getBytes(

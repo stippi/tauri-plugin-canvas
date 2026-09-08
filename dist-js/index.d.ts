@@ -145,6 +145,18 @@ export declare function exportImage(options?: ExportOptions): Promise<string>;
  * which races when two strokes finish in quick succession.
  */
 export declare function exportLatestStrokeFragment(strokeId?: string): Promise<StrokeFragment | null>;
+/**
+ * Native rendering only: the webview has painted the committed stroke
+ * `strokeId` and starts fading its copy in (linear, `STROKE_FADE_MS`). The
+ * overlay answers with the complementary fade-out, so both copies always
+ * composite to the original stroke — see `MetalCanvasView` for the maths.
+ */
+export declare function beginStrokeFade(strokeId: string): Promise<void>;
+/** The webview's copy jumped to full opacity (e.g. the next stroke landed):
+ *  drop the overlay's copy at once. */
+export declare function endStrokeFade(strokeId: string): Promise<void>;
+/** Duration of the hand-over cross-fade, identical on both sides. */
+export declare const STROKE_FADE_MS = 400;
 export declare function onStrokeStarted(handler: (event: StrokeStartEvent) => void): Promise<UnlistenFn>;
 export declare function onStrokeEnded(handler: (event: StrokeEndEvent) => void): Promise<UnlistenFn>;
 export declare function onStrokeSampled(handler: (event: StrokeSampledEvent) => void): Promise<UnlistenFn>;

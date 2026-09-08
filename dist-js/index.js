@@ -75,6 +75,22 @@ async function exportLatestStrokeFragment(strokeId) {
         options: { strokeId },
     });
 }
+/**
+ * Native rendering only: the webview has painted the committed stroke
+ * `strokeId` and starts fading its copy in (linear, `STROKE_FADE_MS`). The
+ * overlay answers with the complementary fade-out, so both copies always
+ * composite to the original stroke — see `MetalCanvasView` for the maths.
+ */
+async function beginStrokeFade(strokeId) {
+    await invoke("plugin:canvas|begin_stroke_fade", { options: { strokeId } });
+}
+/** The webview's copy jumped to full opacity (e.g. the next stroke landed):
+ *  drop the overlay's copy at once. */
+async function endStrokeFade(strokeId) {
+    await invoke("plugin:canvas|end_stroke_fade", { options: { strokeId } });
+}
+/** Duration of the hand-over cross-fade, identical on both sides. */
+const STROKE_FADE_MS = 400;
 async function onStrokeStarted(handler) {
     if (isMobilePlatform()) {
         const listener = await addPluginListener("canvas", "strokeStarted", handler);
@@ -184,5 +200,5 @@ function isMobilePlatform() {
     return false;
 }
 
-export { activatePen, clear, deactivatePen, exportImage, exportLatestStrokeFragment, getStrokes, hideCanvas, isAvailable, onDebug, onEraserStrokeEnded, onEraserStrokeSampled, onEraserStrokeStarted, onStrokeEnded, onStrokeSampled, onStrokeStarted, onStrokesCleared, redo, showCanvas, undo };
+export { STROKE_FADE_MS, activatePen, beginStrokeFade, clear, deactivatePen, endStrokeFade, exportImage, exportLatestStrokeFragment, getStrokes, hideCanvas, isAvailable, onDebug, onEraserStrokeEnded, onEraserStrokeSampled, onEraserStrokeStarted, onStrokeEnded, onStrokeSampled, onStrokeStarted, onStrokesCleared, redo, showCanvas, undo };
 //# sourceMappingURL=index.js.map

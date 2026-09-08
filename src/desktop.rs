@@ -3,7 +3,7 @@ use tauri::{plugin::PluginApi, AppHandle, Runtime};
 
 use crate::models::{
     AvailabilityResponse, CanvasConfig, ExportOptions, ExportStrokeFragmentOptions, PenConfig,
-    Stroke, StrokeFragment,
+    Stroke, StrokeFadeOptions, StrokeFragment,
 };
 
 pub fn init<R: Runtime, C: DeserializeOwned>(
@@ -67,5 +67,13 @@ impl<R: Runtime> Canvas<R> {
         _options: ExportStrokeFragmentOptions,
     ) -> crate::Result<Option<StrokeFragment>> {
         Ok(None)
+    }
+
+    pub fn begin_stroke_fade(&self, _options: StrokeFadeOptions) -> crate::Result<()> {
+        Ok(())
+    }
+
+    pub fn end_stroke_fade(&self, _options: StrokeFadeOptions) -> crate::Result<()> {
+        Ok(())
     }
 }

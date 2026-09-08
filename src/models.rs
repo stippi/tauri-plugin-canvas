@@ -167,6 +167,13 @@ pub struct ExportStrokeFragmentOptions {
     pub stroke_id: Option<String>,
 }
 
+/// Which committed stroke's hand-over fade to begin or end.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct StrokeFadeOptions {
+    pub stroke_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct StrokeFragment {
