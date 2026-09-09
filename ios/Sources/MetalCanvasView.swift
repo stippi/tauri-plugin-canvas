@@ -16,6 +16,12 @@ protocol MetalCanvasViewDelegate: AnyObject {
 final class MetalCanvasView: MTKView {
     weak var strokeDelegate: MetalCanvasViewDelegate?
     var currentDrawingRect: CGRect { drawingRect }
+    /// Called after `layoutSubviews` whenever the view's bounds changed
+    /// (rotation, multitasking resize, return to the foreground). The owner
+    /// re-applies the last requested placement — the drawing rect itself is
+    /// never widened here.
+    var onBoundsChanged: (() -> Void)?
+    private var laidOutBounds: CGRect = .null
 
     private let strokeStorage = StrokeStorage()
     private var penConfig = CanvasPenConfig.default
@@ -88,6 +94,12 @@ final class MetalCanvasView: MTKView {
         strokeRenderer = StrokeRenderer(metalView: self)
         delegate = strokeRenderer
         drawingRect = bounds
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationWillResignActive),
+            name: UIApplication.willResignActiveNotification,
+            object: nil
+        )
     }
 
     @available(*, unavailable)
@@ -104,9 +116,43 @@ final class MetalCanvasView: MTKView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        if drawingRect == .zero {
-            drawingRect = bounds
+        // Never fall back to `bounds` here: a zero drawing rect is a deliberate
+        // state (the webview zeroes it while a popover covers the scene). A
+        // fallback turned it into a fullscreen rect on the next layout pass,
+        // after which every pencil touch became a stroke and the webview saw
+        // no pencil tap at all — the popover could not even be closed.
+        guard bounds != laidOutBounds else { return }
+        laidOutBounds = bounds
+        onBoundsChanged?()
+    }
+
+    /// The app is about to resign active (app switch, Control Center,
+    /// notification). Any stroke in progress is discarded and the recognizer
+    /// reset, so the overlay comes back in a clean state instead of holding
+    /// a half-finished gesture across the transition.
+    @objc private func applicationWillResignActive() {
+        let wasEnabled = strokeRecognizer.isEnabled
+        // Disabling a recognizer mid-gesture transitions it to `.cancelled`
+        // (which lands in `handleStroke`) and resets it.
+        strokeRecognizer.isEnabled = false
+        strokeRecognizer.isEnabled = wasEnabled
+        cancelActiveStroke()
+    }
+
+    /// Discard an in-progress stroke (eraser or pen) without committing it.
+    /// Safe to call when no stroke is active.
+    private func cancelActiveStroke() {
+        if let eraser = activeEraserStroke {
+            activeEraserStroke = nil
+            // Tell the webview to drop its erase preview — without this a
+            // cancelled eraser stroke would leave a stale preview applied.
+            strokeDelegate?.metalCanvasView(self, didEndEraserStroke: eraser.id, cancelled: true)
         }
+        // Discard, don't commit: a cancelled stroke must neither reach the
+        // webview nor occupy a slot in the undo stack (a committed ghost
+        // stroke would desync native undo from the webview's op stack).
+        strokeStorage.cancelStroke()
+        rebuildRenderer(mode: .dirty)
     }
 
     func updateDrawingRect(_ rect: CGRect) {
@@ -294,17 +340,7 @@ final class MetalCanvasView: MTKView {
             }
 
         case .cancelled, .failed:
-            if let eraser = activeEraserStroke {
-                activeEraserStroke = nil
-                // Tell the webview to drop its erase preview — without this a
-                // cancelled eraser stroke would leave a stale preview applied.
-                strokeDelegate?.metalCanvasView(self, didEndEraserStroke: eraser.id, cancelled: true)
-            }
-            // Discard, don't commit: a cancelled stroke must neither reach the
-            // webview nor occupy a slot in the undo stack (a committed ghost
-            // stroke would desync native undo from the webview's op stack).
-            strokeStorage.cancelStroke()
-            rebuildRenderer(mode: .dirty)
+            cancelActiveStroke()
 
         default:
             break

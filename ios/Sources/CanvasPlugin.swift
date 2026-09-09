@@ -70,6 +70,11 @@ class CanvasPlugin: Plugin {
     private weak var webview: WKWebView?
     private weak var parentView: UIView?
     private var overlayView: MetalCanvasView?
+    /// The placement the webview asked for last. Re-applied whenever the
+    /// overlay's bounds change, so a rotation or multitasking resize (also
+    /// one that happened while another app was in front) keeps the drawing
+    /// rect consistent until the webview measures again.
+    private var lastPlacement: Placement = .fullscreen
     private var lastLayoutSnapshot = "layout snapshot unavailable"
 
     @objc override func load(webview: WKWebView) {
@@ -101,7 +106,8 @@ class CanvasPlugin: Plugin {
         DispatchQueue.main.async {
             self.setupOverlayIfNeeded(over: self.webview)
             self.overlayView?.isHidden = false
-            self.applyPlacement(args.placement ?? .fullscreen)
+            self.lastPlacement = args.placement ?? .fullscreen
+            self.applyPlacement(self.lastPlacement)
             self.emitDebug(self.lastLayoutSnapshot)
         }
         invoke.resolve()
@@ -223,6 +229,11 @@ class CanvasPlugin: Plugin {
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         overlay.isHidden = true
         overlay.strokeDelegate = self
+        overlay.onBoundsChanged = { [weak self] in
+            guard let self else { return }
+            self.applyPlacement(self.lastPlacement)
+            self.emitDebug(self.lastLayoutSnapshot)
+        }
         parentView.addSubview(overlay)
         overlay.frame = parentView.bounds
         parentView.bringSubviewToFront(overlay)
