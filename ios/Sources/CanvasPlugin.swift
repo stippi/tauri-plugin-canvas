@@ -485,6 +485,6 @@ extension UIColor {
 }
 
 @_cdecl("init_plugin_canvas")
-func initPlugin() -> Plugin {
+public func initPlugin() -> Plugin {
     CanvasPlugin()
 }
